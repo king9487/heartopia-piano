@@ -47,7 +47,7 @@ class YoutubeMidiApp:
         self.min_note_duration_var = tk.IntVar(value=35)
         self.velocity_threshold_var = tk.IntVar(value=12)
         self.max_simultaneous_var = tk.IntVar(value=0)
-        self.octave_fit_var = tk.StringVar(value="shift")
+        self.octave_fit_var = tk.StringVar(value="octave_shift")
         self.status_var = tk.StringVar(value="Ready")
 
         self.build_ui()
@@ -187,9 +187,9 @@ class YoutubeMidiApp:
         ttk.Combobox(
             cleanup,
             textvariable=self.octave_fit_var,
-            values=("off", "shift", "drop"),
+            values=("off", "octave_shift", "drop"),
             state="readonly",
-            width=8,
+            width=12,
         ).grid(row=0, column=7, sticky="w", padx=(4, 0))
 
         midi_panel = ttk.Frame(self.root, padding=(12, 0, 12, 8))

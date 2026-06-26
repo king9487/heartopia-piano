@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 
 from tools import find_executable, find_ffmpeg_location, run, run_capture
@@ -17,19 +18,20 @@ def get_youtube_info(url, cancel_token=None):
         [
             find_executable("yt-dlp"),
             "--no-playlist",
-            "--print",
-            "%(title)s\t%(id)s",
+            "-J",
             "--skip-download",
             url,
         ],
         cancel_token=cancel_token,
     ).strip()
 
-    line = output.splitlines()[-1] if output else "youtube_audio\tunknown"
-    if "\t" in line:
-        title, video_id = line.rsplit("\t", 1)
-    else:
-        title, video_id = line, "unknown"
+    try:
+        info = json.loads(output)
+    except json.JSONDecodeError:
+        return "youtube_audio", "unknown"
+
+    title = info.get("title") or "youtube_audio"
+    video_id = info.get("id") or "unknown"
 
     return title.strip() or "youtube_audio", video_id.strip() or "unknown"
 

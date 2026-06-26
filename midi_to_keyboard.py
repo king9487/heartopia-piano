@@ -7,6 +7,7 @@ import mido
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 OCTAVE_FIT_OFF = "off"
+OCTAVE_FIT_OCTAVE_SHIFT = "octave_shift"
 OCTAVE_FIT_SHIFT = "shift"
 OCTAVE_FIT_DROP = "drop"
 
@@ -95,16 +96,18 @@ def fit_note_to_map(note, note_map, octave_fit_mode):
 
     lowest = playable_notes[0]
     highest = playable_notes[-1]
-    candidates = []
-    for octave_shift in range(-10, 11):
-        candidate = note + (12 * octave_shift)
+
+    if octave_fit_mode in (OCTAVE_FIT_OCTAVE_SHIFT, OCTAVE_FIT_SHIFT):
+        candidate = note
+        while candidate < lowest:
+            candidate += 12
+        while candidate > highest:
+            candidate -= 12
+
         if lowest <= candidate <= highest and candidate in note_map:
-            candidates.append((abs(octave_shift), candidate))
+            return candidate
 
-    if not candidates:
-        return None
-
-    return sorted(candidates, key=lambda item: item[0])[0][1]
+    return None
 
 
 def extract_raw_note_events(midi_path, transpose=0, velocity_threshold=0):
@@ -197,6 +200,7 @@ def build_clean_note_events(
     merge_gap=0.03,
     max_simultaneous_notes=0,
     octave_fit_mode=OCTAVE_FIT_OFF,
+    harmonic_fill=False,
 ):
     note_map = note_map or DEFAULT_NOTE_MAP
     clean_events = []
@@ -236,6 +240,7 @@ def iter_note_events(
     merge_gap=0.03,
     max_simultaneous_notes=0,
     octave_fit_mode=OCTAVE_FIT_OFF,
+    harmonic_fill=False,
 ):
     note_events = build_clean_note_events(
         midi_path,
@@ -246,6 +251,7 @@ def iter_note_events(
         merge_gap=merge_gap,
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
+        harmonic_fill=harmonic_fill,
     )
 
     keyboard_events = []
@@ -267,6 +273,7 @@ def preview_midi_keyboard(
     merge_gap=0.03,
     max_simultaneous_notes=0,
     octave_fit_mode=OCTAVE_FIT_OFF,
+    harmonic_fill=False,
 ):
     print("\nPreviewing MIDI keyboard events:")
     count = 0
@@ -279,6 +286,7 @@ def preview_midi_keyboard(
         merge_gap=merge_gap,
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
+        harmonic_fill=harmonic_fill,
     ):
         note_name = midi_note_name(note)
         print(f"{timestamp:8.3f}s  note {note:3d} {note_name:3s}  {action:4s}  key {key}")
@@ -303,6 +311,7 @@ def build_keyboard_schedule(
     merge_gap=0.03,
     max_simultaneous_notes=0,
     octave_fit_mode=OCTAVE_FIT_OFF,
+    harmonic_fill=False,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -322,6 +331,7 @@ def build_keyboard_schedule(
         merge_gap=merge_gap,
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
+        harmonic_fill=harmonic_fill,
     )
 
     for event in note_events:
@@ -351,6 +361,7 @@ def play_midi_as_keyboard(
     merge_gap=0.03,
     max_simultaneous_notes=0,
     octave_fit_mode=OCTAVE_FIT_OFF,
+    harmonic_fill=False,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -369,6 +380,7 @@ def play_midi_as_keyboard(
         merge_gap=merge_gap,
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
+        harmonic_fill=harmonic_fill,
     )
 
     try:

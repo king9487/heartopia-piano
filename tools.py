@@ -11,6 +11,10 @@ try:
 except ImportError:
     winreg = None
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 
 REQUIRED_TOOLS = ("yt-dlp", "demucs", "basic-pitch", "ffmpeg")
 
@@ -151,7 +155,7 @@ def run(cmd, cancel_token=None):
     if cancel_token and cancel_token.is_cancelled():
         raise CancelledError("Operation cancelled")
 
-    process = subprocess.Popen(cmd)
+    process = subprocess.Popen(cmd, env=subprocess_environment())
     if cancel_token:
         cancel_token.set_process(process)
 
@@ -189,6 +193,7 @@ def run_capture(cmd, cancel_token=None):
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=subprocess_environment(),
     )
     if cancel_token:
         cancel_token.set_process(process)
@@ -217,6 +222,13 @@ def run_capture(cmd, cancel_token=None):
         raise subprocess.CalledProcessError(return_code, cmd, stdout, stderr)
 
     return stdout
+
+
+def subprocess_environment():
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
 
 
 def terminate_process_tree(process):
