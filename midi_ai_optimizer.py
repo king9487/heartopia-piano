@@ -8,6 +8,7 @@ from midi_to_keyboard import DEFAULT_NOTE_MAP
 
 
 AI_OPTIMIZED_MIDI_NAME = "ai_optimized_37key.mid"
+FINAL_37KEY_MIDI_NAME = "final_37key.mid"
 OPTIMIZER_NONE = "none"
 OPTIMIZER_RULE = "rule"
 OPTIMIZER_OPENAI = "openai"
@@ -284,3 +285,56 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     optimized_notes = validate_note_dicts(optimized_notes)
     write_clean_midi(dicts_to_rule_notes(optimized_notes), output_midi)
     return output_midi
+
+
+def smooth_note_events(notes, options=None):
+    options = options or {}
+    min_duration_ms = max(20, int(options.get("final_min_duration_ms", 45)))
+    quantize_ms = max(1, int(options.get("final_quantize_ms", 10)))
+    notes = validate_note_dicts(notes)
+
+    smoothed = []
+    last_end_by_note = {}
+    for note in sorted(notes, key=lambda item: (item["start_ms"], item["note"])):
+        start_ms = int(round(note["start_ms"] / quantize_ms) * quantize_ms)
+        duration_ms = max(min_duration_ms, int(round(note["duration_ms"] / quantize_ms) * quantize_ms))
+        midi_note = note["note"]
+
+        previous_end = last_end_by_note.get(midi_note)
+        if previous_end is not None and start_ms < previous_end:
+            start_ms = previous_end
+
+        end_ms = start_ms + duration_ms
+        last_end_by_note[midi_note] = end_ms
+        smoothed.append(
+            {
+                "start_ms": start_ms,
+                "duration_ms": duration_ms,
+                "note": midi_note,
+                "velocity": note["velocity"],
+            }
+        )
+
+    return validate_note_dicts(smoothed)
+
+
+def smooth_37key_midi(input_midi, output_midi=None, options=None):
+    input_midi = Path(input_midi)
+    output_midi = Path(output_midi) if output_midi else input_midi.with_name(FINAL_37KEY_MIDI_NAME)
+    smoothed_notes = smooth_note_events(midi_notes_to_dicts(input_midi), options=options)
+    write_clean_midi(dicts_to_rule_notes(smoothed_notes), output_midi)
+    return output_midi
+
+
+def post_process_37key_midi(clean_midi, options=None):
+    clean_midi = Path(clean_midi)
+    ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
+    final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
+
+    optimize_37key_midi(clean_midi, output_midi=ai_midi, options=options)
+    smooth_37key_midi(ai_midi, output_midi=final_midi, options=options)
+    return {
+        "clean_midi": clean_midi,
+        "ai_optimized_midi": ai_midi,
+        "final_midi": final_midi,
+    }

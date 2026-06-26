@@ -13,7 +13,7 @@ from converter import (
     results_from_output_dir,
     youtube_to_midi,
 )
-from midi_ai_optimizer import optimize_37key_midi
+from midi_ai_optimizer import post_process_37key_midi
 from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
 from tools import (
     CancellationToken,
@@ -43,7 +43,7 @@ class YoutubeMidiApp:
         self.url_var = tk.StringVar()
         self.always_top_var = tk.BooleanVar(value=True)
         self.midi_choice_var = tk.StringVar(value="accompaniment_midi")
-        self.midi_source_var = tk.StringVar(value="clean")
+        self.midi_source_var = tk.StringVar(value="final")
         self.convert_vocals_midi_var = tk.BooleanVar(value=False)
         self.selected_midi_var = tk.StringVar()
         self.cached_choice_var = tk.StringVar()
@@ -293,28 +293,35 @@ class YoutubeMidiApp:
         ttk.Label(midi_panel, text="MIDI source").grid(row=2, column=0, sticky="w", pady=(8, 0))
         ttk.Radiobutton(
             midi_panel,
+            text="Final 37-Key MIDI",
+            value="final",
+            variable=self.midi_source_var,
+            command=self.update_selected_midi,
+        ).grid(row=2, column=1, sticky="w", pady=(8, 0))
+        ttk.Radiobutton(
+            midi_panel,
             text="Clean 37-Key MIDI",
             value="clean",
             variable=self.midi_source_var,
             command=self.update_selected_midi,
-        ).grid(row=2, column=1, sticky="w", pady=(8, 0))
+        ).grid(row=2, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
         ttk.Radiobutton(
             midi_panel,
             text="Raw MIDI",
             value="raw",
             variable=self.midi_source_var,
             command=self.update_selected_midi,
-        ).grid(row=2, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
-        ttk.Label(midi_panel, text="Optimizer").grid(row=2, column=3, sticky="e", pady=(8, 0))
+        ).grid(row=2, column=3, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Label(midi_panel, text="Optimizer").grid(row=2, column=4, sticky="e", pady=(8, 0))
         ttk.Combobox(
             midi_panel,
             textvariable=self.optimizer_mode_var,
             values=("None", "Rule", "OpenAI"),
             state="readonly",
             width=8,
-        ).grid(row=2, column=4, sticky="w", padx=(4, 0), pady=(8, 0))
+        ).grid(row=2, column=5, sticky="w", padx=(4, 0), pady=(8, 0))
         ttk.Button(midi_panel, text="Optimize MIDI", command=self.start_optimize_midi).grid(
-            row=2, column=5, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=2, column=6, sticky="w", padx=(8, 0), pady=(8, 0)
         )
 
         selected = ttk.Label(
@@ -403,9 +410,10 @@ class YoutubeMidiApp:
                 self.status_var.set("Keyboard playback failed")
                 messagebox.showerror("Keyboard playback failed", payload)
             elif kind == "optimize_done":
-                self.selected_midi_var.set(str(payload))
+                self.selected_midi_var.set(str(payload["final_midi"]))
                 self.status_var.set("MIDI optimized")
-                self.log_message(f"AI optimized MIDI: {payload}")
+                self.log_message(f"AI optimized MIDI: {payload['ai_optimized_midi']}")
+                self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
             elif kind == "optimize_error":
                 self.status_var.set("MIDI optimization failed")
                 messagebox.showerror("MIDI optimization failed", payload)
@@ -479,10 +487,23 @@ class YoutubeMidiApp:
             self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
             self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
             self.queue.put(
+                ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
+            )
+            self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
+            self.queue.put(
                 (
                     "log",
                     f"Accompaniment Clean 37-Key MIDI: {results['accompaniment_clean_midi']}",
                 )
+            )
+            self.queue.put(
+                (
+                    "log",
+                    f"Accompaniment AI Optimized MIDI: {results['accompaniment_ai_optimized_midi']}",
+                )
+            )
+            self.queue.put(
+                ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
             )
             self.queue.put(("converted", results))
         except CancelledError:
@@ -512,10 +533,23 @@ class YoutubeMidiApp:
             self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
             self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
             self.queue.put(
+                ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
+            )
+            self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
+            self.queue.put(
                 (
                     "log",
                     f"Accompaniment Clean 37-Key MIDI: {results['accompaniment_clean_midi']}",
                 )
+            )
+            self.queue.put(
+                (
+                    "log",
+                    f"Accompaniment AI Optimized MIDI: {results['accompaniment_ai_optimized_midi']}",
+                )
+            )
+            self.queue.put(
+                ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
             )
             self.queue.put(("converted", results))
         except CancelledError:
@@ -532,9 +566,15 @@ class YoutubeMidiApp:
             "vocal_midi": "vocal_clean_midi",
             "accompaniment_midi": "accompaniment_clean_midi",
         }.get(raw_key)
+        final_key = {
+            "vocal_midi": "vocal_final_midi",
+            "accompaniment_midi": "accompaniment_final_midi",
+        }.get(raw_key)
 
         midi_file = None
-        if self.midi_source_var.get() == "clean" and clean_key:
+        if self.midi_source_var.get() == "final" and final_key:
+            midi_file = self.results.get(final_key)
+        if not midi_file and self.midi_source_var.get() in ("final", "clean") and clean_key:
             midi_file = self.results.get(clean_key)
         if not midi_file:
             midi_file = self.results.get(raw_key)
@@ -542,7 +582,10 @@ class YoutubeMidiApp:
             self.midi_choice_var.set("accompaniment_midi")
             raw_key = "accompaniment_midi"
             clean_key = "accompaniment_clean_midi"
-            if self.midi_source_var.get() == "clean":
+            final_key = "accompaniment_final_midi"
+            if self.midi_source_var.get() == "final":
+                midi_file = self.results.get(final_key)
+            if not midi_file and self.midi_source_var.get() in ("final", "clean"):
                 midi_file = self.results.get(clean_key)
             if not midi_file:
                 midi_file = self.results.get(raw_key)
@@ -573,7 +616,7 @@ class YoutubeMidiApp:
         if not results:
             messagebox.showerror(
                 "Converted folder not found",
-                "This folder does not contain both vocals and accompaniment MIDI files.",
+                "This folder does not contain an accompaniment MIDI file.",
             )
             return
 
@@ -586,8 +629,16 @@ class YoutubeMidiApp:
         self.log_message(f"Vocals MIDI: {results.get('vocal_midi')}")
         self.log_message(f"Accompaniment MIDI: {results['accompaniment_midi']}")
         self.log_message(f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}")
+        self.log_message(f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
+        self.log_message(f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}")
         self.log_message(
             f"Accompaniment Clean 37-Key MIDI: {results.get('accompaniment_clean_midi')}"
+        )
+        self.log_message(
+            f"Accompaniment AI Optimized MIDI: {results.get('accompaniment_ai_optimized_midi')}"
+        )
+        self.log_message(
+            f"Accompaniment Final 37-Key MIDI: {results.get('accompaniment_final_midi')}"
         )
         self.status_var.set("Converted folder loaded")
 
@@ -616,6 +667,21 @@ class YoutubeMidiApp:
                     self.results = results
                     self.update_selected_midi()
                     self.log_message(f"Loaded converted folder: {results['base_dir']}")
+                    self.log_message(f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}")
+                    self.log_message(
+                        f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}"
+                    )
+                    self.log_message(f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}")
+                    self.log_message(
+                        f"Accompaniment Clean 37-Key MIDI: {results.get('accompaniment_clean_midi')}"
+                    )
+                    self.log_message(
+                        "Accompaniment AI Optimized MIDI: "
+                        f"{results.get('accompaniment_ai_optimized_midi')}"
+                    )
+                    self.log_message(
+                        f"Accompaniment Final 37-Key MIDI: {results.get('accompaniment_final_midi')}"
+                    )
                     self.status_var.set("Converted folder loaded")
                 return
 
@@ -721,8 +787,7 @@ class YoutubeMidiApp:
 
     def optimize_worker(self, midi_path, options):
         try:
-            output_midi = Path(midi_path).with_name("ai_optimized_37key.mid")
-            result = optimize_37key_midi(midi_path, output_midi=output_midi, options=options)
+            result = post_process_37key_midi(midi_path, options=options)
             self.queue.put(("optimize_done", result))
         except Exception as exc:
             self.queue.put(("optimize_error", str(exc)))

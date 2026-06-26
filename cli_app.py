@@ -10,12 +10,28 @@ def choose_midi_file(results):
     choices = []
     choices.append(
         (
+            "accompaniment final 37-key",
+            results.get("accompaniment_final_midi")
+            or results.get("accompaniment_clean_midi")
+            or results["accompaniment_midi"],
+        )
+    )
+    choices.append(
+        (
             "accompaniment clean 37-key",
             results.get("accompaniment_clean_midi") or results["accompaniment_midi"],
         )
     )
     choices.append(("accompaniment raw", results["accompaniment_midi"]))
-    if results.get("vocal_clean_midi") or results.get("vocal_midi"):
+    if results.get("vocal_final_midi") or results.get("vocal_clean_midi") or results.get("vocal_midi"):
+        choices.append(
+            (
+                "vocals final 37-key",
+                results.get("vocal_final_midi")
+                or results.get("vocal_clean_midi")
+                or results["vocal_midi"],
+            )
+        )
         choices.append(
             ("vocals clean 37-key", results.get("vocal_clean_midi") or results["vocal_midi"])
         )
@@ -77,6 +93,10 @@ def main():
     print("Accompaniment MIDI:", results["accompaniment_midi"])
     print("Vocals Clean 37-Key MIDI:", results.get("vocal_clean_midi"))
     print("Accompaniment Clean 37-Key MIDI:", results.get("accompaniment_clean_midi"))
+    print("Vocals AI Optimized MIDI:", results.get("vocal_ai_optimized_midi"))
+    print("Accompaniment AI Optimized MIDI:", results.get("accompaniment_ai_optimized_midi"))
+    print("Vocals Final 37-Key MIDI:", results.get("vocal_final_midi"))
+    print("Accompaniment Final 37-Key MIDI:", results.get("accompaniment_final_midi"))
 
     if not ask_yes_no("\nPreview keyboard events from a MIDI file?", default=True):
         return

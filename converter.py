@@ -2,11 +2,21 @@ from pathlib import Path
 import json
 import re
 
+from midi_ai_optimizer import (
+    AI_OPTIMIZED_MIDI_NAME,
+    FINAL_37KEY_MIDI_NAME,
+    post_process_37key_midi,
+)
 from midi_rule_engine import DEFAULT_37KEY_CLEAN_OPTIONS, convert_to_37key_midi
 from tools import find_executable, find_ffmpeg_location, run, run_capture
 
 
 CLEAN_37KEY_MIDI_NAME = "clean_37key.mid"
+GENERATED_MIDI_NAMES = {
+    CLEAN_37KEY_MIDI_NAME,
+    AI_OPTIMIZED_MIDI_NAME,
+    FINAL_37KEY_MIDI_NAME,
+}
 
 
 def sanitize_filename(value, max_length=120):
@@ -62,7 +72,7 @@ def latest_midi_file(output_dir, include_clean=False):
     output_dir = Path(output_dir)
     midi_files = list(output_dir.glob("*.mid"))
     if not include_clean:
-        midi_files = [path for path in midi_files if path.name != CLEAN_37KEY_MIDI_NAME]
+        midi_files = [path for path in midi_files if path.name not in GENERATED_MIDI_NAMES]
 
     midi_files = sorted(midi_files, key=lambda path: path.stat().st_mtime, reverse=True)
     return midi_files[0] if midi_files else None
@@ -70,6 +80,14 @@ def latest_midi_file(output_dir, include_clean=False):
 
 def clean_37key_midi_path(raw_midi):
     return Path(raw_midi).with_name(CLEAN_37KEY_MIDI_NAME)
+
+
+def ai_optimized_midi_path(raw_or_clean_midi):
+    return Path(raw_or_clean_midi).with_name(AI_OPTIMIZED_MIDI_NAME)
+
+
+def final_37key_midi_path(raw_or_clean_midi):
+    return Path(raw_or_clean_midi).with_name(FINAL_37KEY_MIDI_NAME)
 
 
 def ensure_clean_37key_midi(raw_midi, options=None):
@@ -89,6 +107,32 @@ def ensure_clean_37key_midi(raw_midi, options=None):
     )
 
 
+def ensure_full_post_processing(raw_midi, options=None):
+    clean_midi = ensure_clean_37key_midi(raw_midi, options=options)
+    ai_midi = ai_optimized_midi_path(clean_midi)
+    final_midi = final_37key_midi_path(clean_midi)
+    newest_input_time = clean_midi.stat().st_mtime
+
+    if (
+        ai_midi.exists()
+        and final_midi.exists()
+        and ai_midi.stat().st_mtime >= newest_input_time
+        and final_midi.stat().st_mtime >= ai_midi.stat().st_mtime
+    ):
+        print("Using existing AI Optimized MIDI:", ai_midi)
+        print("Using existing Final 37-Key MIDI:", final_midi)
+    else:
+        print("Generating AI Optimized MIDI:", ai_midi)
+        print("Generating Final 37-Key MIDI:", final_midi)
+        post_process_37key_midi(clean_midi, options=options)
+
+    return {
+        "clean_midi": clean_midi,
+        "ai_optimized_midi": ai_midi,
+        "final_midi": final_midi,
+    }
+
+
 def results_from_output_dir(base_dir):
     base_dir = Path(base_dir)
     wav_file = base_dir / "download" / "song.wav"
@@ -102,6 +146,10 @@ def results_from_output_dir(base_dir):
 
     vocal_clean_midi = clean_37key_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_clean_midi = clean_37key_midi_path(accompaniment_midi)
+    vocal_ai_midi = ai_optimized_midi_path(vocal_midi) if vocal_midi else None
+    accompaniment_ai_midi = ai_optimized_midi_path(accompaniment_midi)
+    vocal_final_midi = final_37key_midi_path(vocal_midi) if vocal_midi else None
+    accompaniment_final_midi = final_37key_midi_path(accompaniment_midi)
 
     return {
         "base_dir": base_dir,
@@ -115,6 +163,14 @@ def results_from_output_dir(base_dir):
         ),
         "accompaniment_clean_midi": (
             accompaniment_clean_midi if accompaniment_clean_midi.exists() else None
+        ),
+        "vocal_ai_optimized_midi": vocal_ai_midi if vocal_ai_midi and vocal_ai_midi.exists() else None,
+        "accompaniment_ai_optimized_midi": (
+            accompaniment_ai_midi if accompaniment_ai_midi.exists() else None
+        ),
+        "vocal_final_midi": vocal_final_midi if vocal_final_midi and vocal_final_midi.exists() else None,
+        "accompaniment_final_midi": (
+            accompaniment_final_midi if accompaniment_final_midi.exists() else None
         ),
         "cached": True,
     }
@@ -138,11 +194,15 @@ def ensure_clean_results(results, include_vocals=False):
         return results
 
     if include_vocals and results.get("vocal_midi"):
-        results["vocal_clean_midi"] = ensure_clean_37key_midi(results["vocal_midi"])
+        vocal_outputs = ensure_full_post_processing(results["vocal_midi"])
+        results["vocal_clean_midi"] = vocal_outputs["clean_midi"]
+        results["vocal_ai_optimized_midi"] = vocal_outputs["ai_optimized_midi"]
+        results["vocal_final_midi"] = vocal_outputs["final_midi"]
     if results.get("accompaniment_midi"):
-        results["accompaniment_clean_midi"] = ensure_clean_37key_midi(
-            results["accompaniment_midi"]
-        )
+        accompaniment_outputs = ensure_full_post_processing(results["accompaniment_midi"])
+        results["accompaniment_clean_midi"] = accompaniment_outputs["clean_midi"]
+        results["accompaniment_ai_optimized_midi"] = accompaniment_outputs["ai_optimized_midi"]
+        results["accompaniment_final_midi"] = accompaniment_outputs["final_midi"]
     return results
 
 
@@ -326,10 +386,19 @@ def youtube_to_midi(
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
-    print("Step 5: Generating Clean 37-Key MIDI files...")
+    print("Step 5: Generating Clean, AI Optimized, and Final 37-Key MIDI files...")
     if vocal_midi:
-        vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
-    accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
+        vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_clean_midi = vocal_outputs["clean_midi"]
+        vocal_ai_optimized_midi = vocal_outputs["ai_optimized_midi"]
+        vocal_final_midi = vocal_outputs["final_midi"]
+    else:
+        vocal_ai_optimized_midi = None
+        vocal_final_midi = None
+    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_clean_midi = accompaniment_outputs["clean_midi"]
+    accompaniment_ai_optimized_midi = accompaniment_outputs["ai_optimized_midi"]
+    accompaniment_final_midi = accompaniment_outputs["final_midi"]
 
     return {
         "base_dir": base_dir,
@@ -340,6 +409,10 @@ def youtube_to_midi(
         "accompaniment_midi": accompaniment_midi,
         "vocal_clean_midi": vocal_clean_midi,
         "accompaniment_clean_midi": accompaniment_clean_midi,
+        "vocal_ai_optimized_midi": vocal_ai_optimized_midi,
+        "accompaniment_ai_optimized_midi": accompaniment_ai_optimized_midi,
+        "vocal_final_midi": vocal_final_midi,
+        "accompaniment_final_midi": accompaniment_final_midi,
         "cached": False,
     }
 
@@ -389,10 +462,19 @@ def audio_file_to_midi(
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
-    print("Step 5: Generating Clean 37-Key MIDI files...")
+    print("Step 5: Generating Clean, AI Optimized, and Final 37-Key MIDI files...")
     if vocal_midi:
-        vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
-    accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
+        vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_clean_midi = vocal_outputs["clean_midi"]
+        vocal_ai_optimized_midi = vocal_outputs["ai_optimized_midi"]
+        vocal_final_midi = vocal_outputs["final_midi"]
+    else:
+        vocal_ai_optimized_midi = None
+        vocal_final_midi = None
+    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_clean_midi = accompaniment_outputs["clean_midi"]
+    accompaniment_ai_optimized_midi = accompaniment_outputs["ai_optimized_midi"]
+    accompaniment_final_midi = accompaniment_outputs["final_midi"]
 
     return {
         "base_dir": base_dir,
@@ -403,5 +485,9 @@ def audio_file_to_midi(
         "accompaniment_midi": accompaniment_midi,
         "vocal_clean_midi": vocal_clean_midi,
         "accompaniment_clean_midi": accompaniment_clean_midi,
+        "vocal_ai_optimized_midi": vocal_ai_optimized_midi,
+        "accompaniment_ai_optimized_midi": accompaniment_ai_optimized_midi,
+        "vocal_final_midi": vocal_final_midi,
+        "accompaniment_final_midi": accompaniment_final_midi,
         "cached": False,
     }

@@ -9,8 +9,7 @@
 - 使用 Demucs 拆分 `vocals` / `accompaniment`
 - 預設只把 `no_vocals.wav` / `accompaniment` 用 Basic Pitch 轉成 MIDI
 - `vocals` MIDI 轉換是可選功能，預設關閉
-- Basic Pitch 後會另外產生 `clean_37key.mid`，先整理成適合 37 鍵遊戲的 MIDI
-- 可選擇再把 37-key MIDI 優化成 `ai_optimized_37key.mid`
+- Basic Pitch 後會依序產生 `clean_37key.mid`、`ai_optimized_37key.mid`、`final_37key.mid`
 - 支援 37 鍵遊戲鍵位 mapping
 - 支援 MIDI 清理：
   - 過濾太短的音
@@ -76,7 +75,7 @@ CLI 版：
 3. 按 `Convert URL`
 4. 等待下載、拆音軌、轉 `Accompaniment MIDI`
 5. 預設會選 `Accompaniment MIDI`
-6. `MIDI source` 預設選 `Clean 37-Key MIDI`；需要比較原始結果時可切到 `Raw MIDI`
+6. `MIDI source` 預設選 `Final 37-Key MIDI`；需要比較中間結果時可切到 `Clean 37-Key MIDI` 或 `Raw MIDI`
 7. 按 `Preview` 查看會送出的鍵盤事件
 8. 需要再整理旋律時，可選 `Optimizer = Rule` 或 `OpenAI`，再按 `Optimize MIDI`
 9. 按 `Play to Game`
@@ -111,10 +110,11 @@ output\歌曲名稱或檔名
 每個 MIDI 輸出資料夾會保留兩種 MIDI：
 
 - Raw MIDI：Basic Pitch 直接產生的原始 `.mid`
-- Clean 37-Key MIDI：工具整理後的 `clean_37key.mid`，預設用於遊戲播放
-- AI Optimized MIDI：按 `Optimize MIDI` 後產生的 `ai_optimized_37key.mid`
+- Clean 37-Key MIDI：規則引擎整理後的 `clean_37key.mid`
+- AI Optimized MIDI：AI/rule optimizer 產生的 `ai_optimized_37key.mid`
+- Final 37-Key MIDI：最後 smoothing 後的 `final_37key.mid`，預設用於 preview 和遊戲播放
 
-預設只會在 `midi\accompaniment\` 產生 raw MIDI 和 `clean_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的 raw MIDI 和 clean MIDI。
+預設只會在 `midi\accompaniment\` 產生 raw MIDI、`clean_37key.mid`、`ai_optimized_37key.mid`、`final_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的同一組輸出。
 
 ## UI 參數
 
@@ -131,7 +131,7 @@ output\歌曲名稱或檔名
   - `None`：不做額外優化
   - `Rule`：預設模式，使用本地規則優化，不需要網路或 API key
   - `OpenAI`：把 MIDI note JSON 分段送給 LLM 優化，輸出會驗證，失敗會回退到 `Rule`
-- `Optimize MIDI`：將目前選中的 MIDI 優化成同資料夾內的 `ai_optimized_37key.mid`，完成後自動選取該檔案
+- `Optimize MIDI`：將目前選中的 MIDI 重新跑 optimizer 和 smoothing，產生同資料夾內的 `ai_optimized_37key.mid` 和 `final_37key.mid`，完成後自動選取 `final_37key.mid`
 
 ### Timing
 
@@ -145,7 +145,16 @@ output\歌曲名稱或檔名
 
 ### MIDI Cleanup
 
-轉換完成後，工具會在 Basic Pitch raw MIDI 旁邊產生一份 `clean_37key.mid`。這個檔案會先把 MIDI 整理成 37 鍵可播放範圍，再讓 UI 預設拿它播放。UI 的 `MIDI source` 可以在 `Clean 37-Key MIDI` 和 `Raw MIDI` 之間切換。
+轉換完成後，工具會在 Basic Pitch raw MIDI 旁邊依序產生三個後處理檔案：
+
+```text
+raw MIDI
+-> clean_37key.mid
+-> ai_optimized_37key.mid
+-> final_37key.mid
+```
+
+UI 預設用 `final_37key.mid` 做 Preview 和 Play。UI 的 `MIDI source` 可以切換 `Final 37-Key MIDI`、`Clean 37-Key MIDI` 或 `Raw MIDI`。
 
 產生 `clean_37key.mid` 時的主要邏輯：
 
@@ -204,6 +213,8 @@ OpenAI 回傳結果會驗證：
 ```powershell
 $env:OPENAI_API_KEY="你的 API key"
 ```
+
+無論 OpenAI 是否啟用或是否成功，工具都會產生 `ai_optimized_37key.mid`。接著會再做 MIDI smoothing，輸出最終播放用的 `final_37key.mid`。
 
 - `Min note ms`：移除短於此時間的音符
 - `Velocity`：移除力度低於此值的音符
@@ -328,7 +339,7 @@ ui_app.py               Tkinter 圖形介面
 cli_app.py              命令列入口
 converter.py            YouTube/本地音訊轉 MIDI
 midi_rule_engine.py     MIDI 規則引擎，產生 clean_37key.mid
-midi_ai_optimizer.py    AI/Rule MIDI optimizer，產生 ai_optimized_37key.mid
+midi_ai_optimizer.py    AI/Rule MIDI optimizer 與 smoothing，產生 ai_optimized_37key.mid / final_37key.mid
 midi_to_keyboard.py     MIDI preview、mapping、鍵盤播放
 tools.py                外部工具尋找、subprocess、取消邏輯
 requirements.txt        Python 依賴
