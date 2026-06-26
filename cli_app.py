@@ -3,7 +3,7 @@ from pathlib import Path
 
 from converter import audio_file_to_midi, youtube_to_midi
 from midi_to_keyboard import play_midi_as_keyboard, preview_midi_keyboard
-from tools import check_cli_dependencies, default_demucs_device
+from tools import check_cli_dependencies, default_demucs_device, format_command_error
 
 
 def choose_midi_file(results):
@@ -38,10 +38,14 @@ def main():
     check_cli_dependencies()
 
     source_path = Path(source)
-    if source_path.exists():
-        results = audio_file_to_midi(source_path, demucs_device=default_demucs_device())
-    else:
-        results = youtube_to_midi(source, demucs_device=default_demucs_device())
+    try:
+        if source_path.exists():
+            results = audio_file_to_midi(source_path, demucs_device=default_demucs_device())
+        else:
+            results = youtube_to_midi(source, demucs_device=default_demucs_device())
+    except Exception as exc:
+        print(format_command_error(exc))
+        return
 
     print("\nDone!")
     print("Output folder:", results["base_dir"])

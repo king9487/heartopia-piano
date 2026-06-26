@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -45,7 +46,7 @@ class CancellationToken:
             self._process = process
 
         if self.is_cancelled() and process.poll() is None:
-            process.terminate()
+            terminate_process_tree(process)
 
     def clear_process(self, process):
         with self._lock:
@@ -150,7 +151,7 @@ def default_demucs_device():
     return None
 
 
-def run(cmd, cancel_token=None):
+def run(cmd, cancel_token=None, timeout=None):
     print("\nRunning:", " ".join(cmd))
     if cancel_token and cancel_token.is_cancelled():
         raise CancelledError("Operation cancelled")
@@ -159,6 +160,7 @@ def run(cmd, cancel_token=None):
     if cancel_token:
         cancel_token.set_process(process)
 
+    started_at = time.monotonic()
     try:
         while True:
             return_code = process.poll()
@@ -168,6 +170,10 @@ def run(cmd, cancel_token=None):
             if cancel_token and cancel_token.is_cancelled():
                 terminate_process_tree(process)
                 raise CancelledError("Operation cancelled")
+
+            if timeout is not None and time.monotonic() - started_at > timeout:
+                terminate_process_tree(process)
+                raise TimeoutError(f"Command timed out after {timeout} seconds: {' '.join(cmd)}")
 
             time.sleep(0.2)
     finally:
@@ -181,47 +187,78 @@ def run(cmd, cancel_token=None):
         raise subprocess.CalledProcessError(return_code, cmd)
 
 
-def run_capture(cmd, cancel_token=None):
+def format_command_error(error):
+    if isinstance(error, subprocess.CalledProcessError):
+        parts = [
+            f"Command failed with exit code {error.returncode}:",
+            " ".join(str(part) for part in error.cmd),
+        ]
+        output = getattr(error, "output", None)
+        stderr = getattr(error, "stderr", None)
+        if output:
+            parts.append("\nOutput:")
+            parts.append(str(output).strip())
+        if stderr:
+            parts.append("\nError:")
+            parts.append(str(stderr).strip())
+        return "\n".join(part for part in parts if part)
+
+    return str(error)
+
+
+def run_capture(cmd, cancel_token=None, timeout=120):
     print("\nRunning:", " ".join(cmd))
     if cancel_token and cancel_token.is_cancelled():
         raise CancelledError("Operation cancelled")
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=subprocess_environment(),
-    )
-    if cancel_token:
-        cancel_token.set_process(process)
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stdout_file:
+        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
+            process = subprocess.Popen(
+                cmd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=subprocess_environment(),
+            )
+            if cancel_token:
+                cancel_token.set_process(process)
 
-    try:
-        while True:
-            return_code = process.poll()
-            if return_code is not None:
-                break
+            started_at = time.monotonic()
+            try:
+                while True:
+                    return_code = process.poll()
+                    if return_code is not None:
+                        break
+
+                    if cancel_token and cancel_token.is_cancelled():
+                        terminate_process_tree(process)
+                        raise CancelledError("Operation cancelled")
+
+                    if timeout is not None and time.monotonic() - started_at > timeout:
+                        terminate_process_tree(process)
+                        raise TimeoutError(
+                            f"Command timed out after {timeout} seconds: {' '.join(cmd)}"
+                        )
+
+                    time.sleep(0.2)
+            finally:
+                if cancel_token:
+                    cancel_token.clear_process(process)
+
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout = stdout_file.read()
+            stderr = stderr_file.read()
 
             if cancel_token and cancel_token.is_cancelled():
-                terminate_process_tree(process)
                 raise CancelledError("Operation cancelled")
 
-            time.sleep(0.2)
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, cmd, stdout, stderr)
 
-        stdout, stderr = process.communicate()
-    finally:
-        if cancel_token:
-            cancel_token.clear_process(process)
-
-    if cancel_token and cancel_token.is_cancelled():
-        raise CancelledError("Operation cancelled")
-
-    if return_code != 0:
-        raise subprocess.CalledProcessError(return_code, cmd, stdout, stderr)
-
-    return stdout
+            return stdout
 
 
 def subprocess_environment():

@@ -13,7 +13,13 @@ from converter import (
     youtube_to_midi,
 )
 from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
-from tools import CancellationToken, CancelledError, check_cli_dependencies, default_demucs_device
+from tools import (
+    CancellationToken,
+    CancelledError,
+    check_cli_dependencies,
+    default_demucs_device,
+    format_command_error,
+)
 
 
 class YoutubeMidiApp:
@@ -47,7 +53,10 @@ class YoutubeMidiApp:
         self.min_note_duration_var = tk.IntVar(value=35)
         self.velocity_threshold_var = tk.IntVar(value=12)
         self.max_simultaneous_var = tk.IntVar(value=0)
-        self.octave_fit_var = tk.StringVar(value="octave_shift")
+        self.octave_fit_var = tk.StringVar(value="smart")
+        self.melody_only_var = tk.BooleanVar(value=False)
+        self.melody_max_notes_var = tk.IntVar(value=1)
+        self.melody_window_var = tk.IntVar(value=80)
         self.status_var = tk.StringVar(value="Ready")
 
         self.build_ui()
@@ -183,14 +192,44 @@ class YoutubeMidiApp:
             width=6,
         ).grid(row=0, column=5, sticky="w", padx=(4, 18))
 
-        ttk.Label(cleanup, text="Octave fit").grid(row=0, column=6, sticky="w")
+        ttk.Label(cleanup, text="Range mode").grid(row=0, column=6, sticky="w")
         ttk.Combobox(
             cleanup,
             textvariable=self.octave_fit_var,
-            values=("off", "octave_shift", "drop"),
+            values=("smart", "drop", "octave_shift"),
             state="readonly",
             width=12,
         ).grid(row=0, column=7, sticky="w", padx=(4, 0))
+
+        ttk.Checkbutton(
+            cleanup,
+            text="Melody only",
+            variable=self.melody_only_var,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        ttk.Label(cleanup, text="Melody notes").grid(
+            row=1, column=2, sticky="w", pady=(8, 0)
+        )
+        ttk.Spinbox(
+            cleanup,
+            from_=1,
+            to=3,
+            increment=1,
+            textvariable=self.melody_max_notes_var,
+            width=6,
+        ).grid(row=1, column=3, sticky="w", padx=(4, 18), pady=(8, 0))
+
+        ttk.Label(cleanup, text="Window ms").grid(
+            row=1, column=4, sticky="w", pady=(8, 0)
+        )
+        ttk.Spinbox(
+            cleanup,
+            from_=20,
+            to=250,
+            increment=10,
+            textvariable=self.melody_window_var,
+            width=6,
+        ).grid(row=1, column=5, sticky="w", padx=(4, 18), pady=(8, 0))
 
         midi_panel = ttk.Frame(self.root, padding=(12, 0, 12, 8))
         midi_panel.grid(row=4, column=0, sticky="ew")
@@ -397,7 +436,7 @@ class YoutubeMidiApp:
         except CancelledError:
             self.queue.put(("convert_cancelled", None))
         except Exception as exc:
-            self.queue.put(("convert_error", str(exc)))
+            self.queue.put(("convert_error", format_command_error(exc)))
 
     def local_audio_convert_worker(self, filename):
         try:
@@ -422,7 +461,7 @@ class YoutubeMidiApp:
         except CancelledError:
             self.queue.put(("convert_cancelled", None))
         except Exception as exc:
-            self.queue.put(("convert_error", str(exc)))
+            self.queue.put(("convert_error", format_command_error(exc)))
 
     def update_selected_midi(self):
         if not self.results:
@@ -506,16 +545,38 @@ class YoutubeMidiApp:
 
     def get_cleanup_settings(self):
         try:
-            return {
+            min_note_duration = int(self.min_note_duration_var.get())
+            velocity_threshold = int(self.velocity_threshold_var.get())
+            max_simultaneous_notes = int(self.max_simultaneous_var.get())
+            melody_max_notes = int(self.melody_max_notes_var.get())
+            melody_window = int(self.melody_window_var.get())
+            settings = {
                 "transpose": int(self.transpose_var.get()),
-                "min_note_duration": int(self.min_note_duration_var.get()) / 1000,
-                "velocity_threshold": int(self.velocity_threshold_var.get()),
-                "max_simultaneous_notes": int(self.max_simultaneous_var.get()),
-                "octave_fit_mode": self.octave_fit_var.get(),
+                "min_note_duration": min_note_duration / 1000,
+                "velocity_threshold": velocity_threshold,
+                "max_simultaneous_notes": max_simultaneous_notes,
+                "out_of_range_mode": self.octave_fit_var.get(),
+                "melody_only": bool(self.melody_only_var.get()),
+                "melody_max_notes": melody_max_notes,
+                "melody_window": melody_window / 1000,
             }
         except (TypeError, ValueError):
             messagebox.showerror("Invalid setting", "Cleanup settings must be numbers.")
             return None
+
+        if (
+            min_note_duration < 0
+            or velocity_threshold < 0
+            or velocity_threshold > 127
+            or max_simultaneous_notes < 0
+            or melody_max_notes < 1
+            or melody_max_notes > 3
+            or melody_window <= 0
+        ):
+            messagebox.showerror("Invalid setting", "Cleanup settings are out of range.")
+            return None
+
+        return settings
 
     def preview_selected_midi(self):
         midi_path = self.get_selected_midi()

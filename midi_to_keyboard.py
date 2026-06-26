@@ -10,6 +10,11 @@ OCTAVE_FIT_OFF = "off"
 OCTAVE_FIT_OCTAVE_SHIFT = "octave_shift"
 OCTAVE_FIT_SHIFT = "shift"
 OCTAVE_FIT_DROP = "drop"
+OCTAVE_FIT_SMART = "smart"
+
+SMART_MAX_RANGE_DISTANCE = 24
+SMART_MIN_OUT_OF_RANGE_DURATION = 0.08
+SMART_MIN_OUT_OF_RANGE_VELOCITY = 35
 
 
 DEFAULT_NOTE_MAP = {
@@ -83,29 +88,70 @@ class CleanNoteEvent:
         return self.end - self.start
 
 
-def fit_note_to_map(note, note_map, octave_fit_mode):
+def playable_note_range(note_map):
+    playable_notes = sorted(note_map)
+    if not playable_notes:
+        return None, None
+    return playable_notes[0], playable_notes[-1]
+
+
+def distance_from_range(note, lowest, highest):
+    if note < lowest:
+        return lowest - note
+    if note > highest:
+        return note - highest
+    return 0
+
+
+def octave_shift_note(note, note_map):
+    lowest, highest = playable_note_range(note_map)
+    if lowest is None:
+        return None
+
+    candidate = note
+    while candidate < lowest:
+        candidate += 12
+    while candidate > highest:
+        candidate -= 12
+
+    if lowest <= candidate <= highest and candidate in note_map:
+        return candidate
+    return None
+
+
+def fit_note_to_map(
+    note,
+    note_map,
+    octave_fit_mode,
+    duration=0.0,
+    velocity=127,
+    min_note_duration=0.0,
+    velocity_threshold=0,
+):
     if note in note_map:
         return note
 
     if octave_fit_mode in (OCTAVE_FIT_OFF, OCTAVE_FIT_DROP):
         return None
 
-    playable_notes = sorted(note_map)
-    if not playable_notes:
+    lowest, highest = playable_note_range(note_map)
+    if lowest is None:
         return None
 
-    lowest = playable_notes[0]
-    highest = playable_notes[-1]
-
     if octave_fit_mode in (OCTAVE_FIT_OCTAVE_SHIFT, OCTAVE_FIT_SHIFT):
-        candidate = note
-        while candidate < lowest:
-            candidate += 12
-        while candidate > highest:
-            candidate -= 12
+        return octave_shift_note(note, note_map)
 
-        if lowest <= candidate <= highest and candidate in note_map:
-            return candidate
+    if octave_fit_mode == OCTAVE_FIT_SMART:
+        if distance_from_range(note, lowest, highest) > SMART_MAX_RANGE_DISTANCE:
+            return None
+
+        if duration < max(min_note_duration, SMART_MIN_OUT_OF_RANGE_DURATION):
+            return None
+
+        if velocity < max(velocity_threshold, SMART_MIN_OUT_OF_RANGE_VELOCITY):
+            return None
+
+        return octave_shift_note(note, note_map)
 
     return None
 
@@ -166,6 +212,25 @@ def merge_close_repeated_notes(note_events, merge_gap):
     return sorted(merged, key=lambda event: (event.start, event.note))
 
 
+def drop_close_raw_repeated_notes(raw_note_events, min_gap):
+    if min_gap <= 0:
+        return raw_note_events
+
+    kept_events = []
+    last_end_by_note = {}
+    for start, end, note, velocity in sorted(
+        raw_note_events, key=lambda item: (item[0], item[2])
+    ):
+        previous_end = last_end_by_note.get(note)
+        if previous_end is not None and start - previous_end <= min_gap:
+            continue
+
+        kept_events.append((start, end, note, velocity))
+        last_end_by_note[note] = end
+
+    return kept_events
+
+
 def limit_simultaneous_notes(note_events, max_simultaneous_notes):
     if max_simultaneous_notes is None or max_simultaneous_notes <= 0:
         return note_events
@@ -191,6 +256,32 @@ def limit_simultaneous_notes(note_events, max_simultaneous_notes):
     return sorted(limited, key=lambda event: (event.start, event.note))
 
 
+def apply_melody_only(note_events, melody_window=0.08, melody_max_notes=1):
+    if not note_events:
+        return note_events
+
+    if melody_window <= 0:
+        melody_window = 0.08
+
+    melody_max_notes = max(1, min(int(melody_max_notes), 3))
+    by_window = {}
+    for event in note_events:
+        window_key = int(event.start / melody_window)
+        by_window.setdefault(window_key, []).append(event)
+
+    selected = []
+    for events in by_window.values():
+        selected.extend(
+            sorted(
+                events,
+                key=lambda event: (event.velocity, event.duration, event.note),
+                reverse=True,
+            )[:melody_max_notes]
+        )
+
+    return sorted(selected, key=lambda event: (event.start, event.note))
+
+
 def build_clean_note_events(
     midi_path,
     note_map=None,
@@ -199,21 +290,42 @@ def build_clean_note_events(
     velocity_threshold=0,
     merge_gap=0.03,
     max_simultaneous_notes=0,
-    octave_fit_mode=OCTAVE_FIT_OFF,
+    octave_fit_mode=OCTAVE_FIT_SMART,
     harmonic_fill=False,
+    melody_only=False,
+    melody_window=0.08,
+    melody_max_notes=1,
+    out_of_range_mode=None,
 ):
     note_map = note_map or DEFAULT_NOTE_MAP
+    if out_of_range_mode is not None:
+        octave_fit_mode = out_of_range_mode
     clean_events = []
-
-    for start, end, raw_note, velocity in extract_raw_note_events(
+    raw_events = extract_raw_note_events(
         midi_path, transpose=transpose, velocity_threshold=velocity_threshold
-    ):
-        note = fit_note_to_map(raw_note, note_map, octave_fit_mode)
-        if note is None:
-            continue
+    )
+    filtered_raw_events = []
 
+    for start, end, raw_note, velocity in raw_events:
         duration = end - start
         if duration < min_note_duration:
+            continue
+        filtered_raw_events.append((start, end, raw_note, velocity))
+
+    filtered_raw_events = drop_close_raw_repeated_notes(filtered_raw_events, merge_gap)
+
+    for start, end, raw_note, velocity in filtered_raw_events:
+        duration = end - start
+        note = fit_note_to_map(
+            raw_note,
+            note_map,
+            octave_fit_mode,
+            duration=duration,
+            velocity=velocity,
+            min_note_duration=min_note_duration,
+            velocity_threshold=velocity_threshold,
+        )
+        if note is None:
             continue
 
         clean_events.append(
@@ -227,6 +339,12 @@ def build_clean_note_events(
         )
 
     clean_events = merge_close_repeated_notes(clean_events, merge_gap)
+    if melody_only:
+        clean_events = apply_melody_only(
+            clean_events,
+            melody_window=melody_window,
+            melody_max_notes=melody_max_notes,
+        )
     clean_events = limit_simultaneous_notes(clean_events, max_simultaneous_notes)
     return clean_events
 
@@ -239,8 +357,12 @@ def iter_note_events(
     velocity_threshold=0,
     merge_gap=0.03,
     max_simultaneous_notes=0,
-    octave_fit_mode=OCTAVE_FIT_OFF,
+    octave_fit_mode=OCTAVE_FIT_SMART,
     harmonic_fill=False,
+    melody_only=False,
+    melody_window=0.08,
+    melody_max_notes=1,
+    out_of_range_mode=None,
 ):
     note_events = build_clean_note_events(
         midi_path,
@@ -252,6 +374,10 @@ def iter_note_events(
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
         harmonic_fill=harmonic_fill,
+        melody_only=melody_only,
+        melody_window=melody_window,
+        melody_max_notes=melody_max_notes,
+        out_of_range_mode=out_of_range_mode,
     )
 
     keyboard_events = []
@@ -272,8 +398,12 @@ def preview_midi_keyboard(
     velocity_threshold=0,
     merge_gap=0.03,
     max_simultaneous_notes=0,
-    octave_fit_mode=OCTAVE_FIT_OFF,
+    octave_fit_mode=OCTAVE_FIT_SMART,
     harmonic_fill=False,
+    melody_only=False,
+    melody_window=0.08,
+    melody_max_notes=1,
+    out_of_range_mode=None,
 ):
     print("\nPreviewing MIDI keyboard events:")
     count = 0
@@ -287,6 +417,10 @@ def preview_midi_keyboard(
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
         harmonic_fill=harmonic_fill,
+        melody_only=melody_only,
+        melody_window=melody_window,
+        melody_max_notes=melody_max_notes,
+        out_of_range_mode=out_of_range_mode,
     ):
         note_name = midi_note_name(note)
         print(f"{timestamp:8.3f}s  note {note:3d} {note_name:3s}  {action:4s}  key {key}")
@@ -310,8 +444,12 @@ def build_keyboard_schedule(
     velocity_threshold=0,
     merge_gap=0.03,
     max_simultaneous_notes=0,
-    octave_fit_mode=OCTAVE_FIT_OFF,
+    octave_fit_mode=OCTAVE_FIT_SMART,
     harmonic_fill=False,
+    melody_only=False,
+    melody_window=0.08,
+    melody_max_notes=1,
+    out_of_range_mode=None,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -332,6 +470,10 @@ def build_keyboard_schedule(
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
         harmonic_fill=harmonic_fill,
+        melody_only=melody_only,
+        melody_window=melody_window,
+        melody_max_notes=melody_max_notes,
+        out_of_range_mode=out_of_range_mode,
     )
 
     for event in note_events:
@@ -360,8 +502,12 @@ def play_midi_as_keyboard(
     velocity_threshold=0,
     merge_gap=0.03,
     max_simultaneous_notes=0,
-    octave_fit_mode=OCTAVE_FIT_OFF,
+    octave_fit_mode=OCTAVE_FIT_SMART,
     harmonic_fill=False,
+    melody_only=False,
+    melody_window=0.08,
+    melody_max_notes=1,
+    out_of_range_mode=None,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -381,6 +527,10 @@ def play_midi_as_keyboard(
         max_simultaneous_notes=max_simultaneous_notes,
         octave_fit_mode=octave_fit_mode,
         harmonic_fill=harmonic_fill,
+        melody_only=melody_only,
+        melody_window=melody_window,
+        melody_max_notes=melody_max_notes,
+        out_of_range_mode=out_of_range_mode,
     )
 
     try:

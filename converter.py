@@ -18,11 +18,17 @@ def get_youtube_info(url, cancel_token=None):
         [
             find_executable("yt-dlp"),
             "--no-playlist",
+            "--no-check-certificates",
+            "--socket-timeout",
+            "20",
+            "--retries",
+            "2",
             "-J",
             "--skip-download",
             url,
         ],
         cancel_token=cancel_token,
+        timeout=90,
     ).strip()
 
     try:
@@ -109,6 +115,11 @@ def download_youtube_audio(url, output_dir, cancel_token=None):
         [
             find_executable("yt-dlp"),
             "--no-playlist",
+            "--no-check-certificates",
+            "--socket-timeout",
+            "20",
+            "--retries",
+            "2",
             "-x",
             "--ffmpeg-location",
             ffmpeg_location,
@@ -119,6 +130,7 @@ def download_youtube_audio(url, output_dir, cancel_token=None):
             url,
         ],
         cancel_token=cancel_token,
+        timeout=900,
     )
 
     if not wav_file.exists():
