@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 import re
 
-from midi_to_keyboard import DEFAULT_37KEY_CLEAN_OPTIONS, DEFAULT_NOTE_MAP, convert_to_37key_midi
+from midi_rule_engine import DEFAULT_37KEY_CLEAN_OPTIONS, convert_to_37key_midi
 from tools import find_executable, find_ffmpeg_location, run, run_capture
 
 
@@ -84,8 +84,7 @@ def ensure_clean_37key_midi(raw_midi, options=None):
         convert_to_37key_midi(
             raw_midi,
             output_midi,
-            DEFAULT_NOTE_MAP,
-            clean_options,
+            options=clean_options,
         )
     )
 

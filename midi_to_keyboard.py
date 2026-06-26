@@ -389,47 +389,9 @@ def write_clean_midi(note_events, output_midi, quantize_ms=None):
 
 
 def convert_to_37key_midi(input_midi, output_midi, note_map=None, options=None):
-    note_map = note_map or DEFAULT_NOTE_MAP
-    options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **(options or {})}
-    min_note_duration = max(0, int(options.get("min_note_duration_ms", 0))) / 1000
-    velocity_threshold = max(0, min(int(options.get("velocity_threshold", 0)), 127))
-    max_simultaneous_notes = int(options.get("max_simultaneous_notes") or 0)
-    out_of_range_mode = options.get("out_of_range_mode") or OCTAVE_FIT_SMART
-    prefer_melody = bool(options.get("prefer_melody", True))
-    quantize_ms = options.get("quantize_ms")
-    if quantize_ms is not None:
-        quantize_ms = max(1, int(quantize_ms))
+    from midi_rule_engine import convert_to_37key_midi as rule_engine_convert
 
-    clean_events = []
-    for start, end, raw_note, velocity in extract_raw_note_events(
-        input_midi, velocity_threshold=velocity_threshold
-    ):
-        duration = end - start
-        if duration < min_note_duration:
-            continue
-
-        note = fit_note_for_37key_midi(raw_note, note_map, out_of_range_mode)
-        if note is None:
-            continue
-
-        clean_events.append(
-            CleanNoteEvent(
-                start=start,
-                end=end,
-                note=note,
-                key=note_map[note],
-                velocity=velocity,
-            )
-        )
-
-    clean_events = group_37key_events(
-        clean_events,
-        window_seconds=0.03,
-        max_simultaneous_notes=max_simultaneous_notes,
-        prefer_melody=prefer_melody,
-    )
-    write_clean_midi(clean_events, output_midi, quantize_ms=quantize_ms)
-    return output_midi
+    return rule_engine_convert(input_midi, output_midi, note_map=note_map, options=options)
 
 
 def build_clean_note_events(

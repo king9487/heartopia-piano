@@ -146,15 +146,16 @@ output\歌曲名稱或檔名
 3. 移除太短、velocity 太低的音
 4. 用 `smart` 模式把合理的範圍外音折回 37 鍵；離可玩範圍超過 24 半音的音會丟掉
 5. 以約 `30ms` 的小時間窗分組
-6. 每組只保留分數最高的幾個音
+6. 依照 velocity、音長、pitch stability、旋律偏好計分
+7. 每組只保留分數最高的幾個音
 
 分數大致是：
 
 ```text
-score = velocity * 1.0 + duration_ms * 0.2 + pitch_bonus
+score = velocity * 1.0 + duration_ms * 0.2 + pitch_stability_bonus + pitch_bonus
 ```
 
-`pitch_bonus` 會在偏好旋律時稍微偏向較高的音，讓伴奏 MIDI 比較容易留下主旋律線。
+`pitch_stability_bonus` 會偏好原本就在 37 鍵範圍內，或只需要少量八度平移的音。`pitch_bonus` 會在偏好旋律時稍微偏向較高的音，讓伴奏 MIDI 比較容易留下主旋律線。
 
 - `Min note ms`：移除短於此時間的音符
 - `Velocity`：移除力度低於此值的音符
@@ -278,7 +279,8 @@ youtube_to_midi.py      UI 入口
 ui_app.py               Tkinter 圖形介面
 cli_app.py              命令列入口
 converter.py            YouTube/本地音訊轉 MIDI
-midi_to_keyboard.py     MIDI 清理、clean_37key.mid 產生、mapping、鍵盤播放
+midi_rule_engine.py     MIDI 規則引擎，產生 clean_37key.mid
+midi_to_keyboard.py     MIDI preview、mapping、鍵盤播放
 tools.py                外部工具尋找、subprocess、取消邏輯
 requirements.txt        Python 依賴
 setup.ps1               Windows 安裝/重建環境腳本
