@@ -7,24 +7,27 @@ from tools import check_cli_dependencies, default_demucs_device, format_command_
 
 
 def choose_midi_file(results):
-    choices = {
-        "1": ("vocals clean 37-key", results.get("vocal_clean_midi") or results["vocal_midi"]),
-        "2": (
+    choices = []
+    choices.append(
+        (
             "accompaniment clean 37-key",
             results.get("accompaniment_clean_midi") or results["accompaniment_midi"],
-        ),
-        "3": ("vocals raw", results["vocal_midi"]),
-        "4": ("accompaniment raw", results["accompaniment_midi"]),
-    }
+        )
+    )
+    choices.append(("accompaniment raw", results["accompaniment_midi"]))
+    if results.get("vocal_clean_midi") or results.get("vocal_midi"):
+        choices.append(
+            ("vocals clean 37-key", results.get("vocal_clean_midi") or results["vocal_midi"])
+        )
+        choices.append(("vocals raw", results["vocal_midi"]))
 
+    numbered_choices = {str(index): choice for index, choice in enumerate(choices, start=1)}
     print("\nChoose MIDI for keyboard output:")
-    print("1. Vocals Clean 37-Key MIDI")
-    print("2. Accompaniment Clean 37-Key MIDI")
-    print("3. Vocals Raw MIDI")
-    print("4. Accompaniment Raw MIDI")
-    choice = input("Select 1-4 [1]: ").strip() or "1"
+    for index, (label, _) in numbered_choices.items():
+        print(f"{index}. {label.title()}")
+    choice = input(f"Select 1-{len(numbered_choices)} [1]: ").strip() or "1"
 
-    label, midi_file = choices.get(choice, choices["1"])
+    label, midi_file = numbered_choices.get(choice, numbered_choices["1"])
     print(f"Selected {label} MIDI: {midi_file}")
     return midi_file
 
@@ -43,13 +46,22 @@ def main():
         raise ValueError("Source cannot be empty")
 
     check_cli_dependencies()
+    convert_vocals_midi = ask_yes_no("Also convert vocals MIDI?", default=False)
 
     source_path = Path(source)
     try:
         if source_path.exists():
-            results = audio_file_to_midi(source_path, demucs_device=default_demucs_device())
+            results = audio_file_to_midi(
+                source_path,
+                demucs_device=default_demucs_device(),
+                convert_vocals_midi=convert_vocals_midi,
+            )
         else:
-            results = youtube_to_midi(source, demucs_device=default_demucs_device())
+            results = youtube_to_midi(
+                source,
+                demucs_device=default_demucs_device(),
+                convert_vocals_midi=convert_vocals_midi,
+            )
     except Exception as exc:
         print(format_command_error(exc))
         return
@@ -61,7 +73,7 @@ def main():
     print("Original WAV:", results["wav_file"])
     print("Vocals WAV:", results["vocals"])
     print("Accompaniment WAV:", results["no_vocals"])
-    print("Vocals MIDI:", results["vocal_midi"])
+    print("Vocals MIDI:", results.get("vocal_midi"))
     print("Accompaniment MIDI:", results["accompaniment_midi"])
     print("Vocals Clean 37-Key MIDI:", results.get("vocal_clean_midi"))
     print("Accompaniment Clean 37-Key MIDI:", results.get("accompaniment_clean_midi"))

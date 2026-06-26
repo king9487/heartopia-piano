@@ -41,8 +41,9 @@ class YoutubeMidiApp:
 
         self.url_var = tk.StringVar()
         self.always_top_var = tk.BooleanVar(value=True)
-        self.midi_choice_var = tk.StringVar(value="vocal_midi")
+        self.midi_choice_var = tk.StringVar(value="accompaniment_midi")
         self.midi_source_var = tk.StringVar(value="clean")
+        self.convert_vocals_midi_var = tk.BooleanVar(value=False)
         self.selected_midi_var = tk.StringVar()
         self.cached_choice_var = tk.StringVar()
         self.cached_outputs = []
@@ -125,6 +126,12 @@ class YoutubeMidiApp:
             state="readonly",
             width=8,
         ).grid(row=0, column=6, sticky="w")
+
+        ttk.Checkbutton(
+            options,
+            text="Convert vocals MIDI",
+            variable=self.convert_vocals_midi_var,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         timing = ttk.Frame(self.root, padding=(12, 0, 12, 8))
         timing.grid(row=2, column=0, sticky="ew")
@@ -441,15 +448,16 @@ class YoutubeMidiApp:
                 url,
                 cancel_token=self.convert_cancel_token,
                 demucs_device=demucs_device,
+                convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
             )
 
             self.queue.put(("log", f"Output folder: {results['base_dir']}"))
             if results.get("cached"):
                 self.queue.put(("log", "Loaded cached conversion."))
             self.queue.put(("log", f"Original WAV: {results['wav_file']}"))
-            self.queue.put(("log", f"Vocals MIDI: {results['vocal_midi']}"))
+            self.queue.put(("log", f"Vocals MIDI: {results.get('vocal_midi')}"))
             self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
-            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results['vocal_clean_midi']}"))
+            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
             self.queue.put(
                 (
                     "log",
@@ -473,15 +481,16 @@ class YoutubeMidiApp:
                 filename,
                 cancel_token=self.convert_cancel_token,
                 demucs_device=demucs_device,
+                convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
             )
 
             self.queue.put(("log", f"Output folder: {results['base_dir']}"))
             if results.get("cached"):
                 self.queue.put(("log", "Loaded cached conversion."))
             self.queue.put(("log", f"Original WAV: {results['wav_file']}"))
-            self.queue.put(("log", f"Vocals MIDI: {results['vocal_midi']}"))
+            self.queue.put(("log", f"Vocals MIDI: {results.get('vocal_midi')}"))
             self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
-            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results['vocal_clean_midi']}"))
+            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
             self.queue.put(
                 (
                     "log",
@@ -509,6 +518,14 @@ class YoutubeMidiApp:
             midi_file = self.results.get(clean_key)
         if not midi_file:
             midi_file = self.results.get(raw_key)
+        if not midi_file and raw_key == "vocal_midi":
+            self.midi_choice_var.set("accompaniment_midi")
+            raw_key = "accompaniment_midi"
+            clean_key = "accompaniment_clean_midi"
+            if self.midi_source_var.get() == "clean":
+                midi_file = self.results.get(clean_key)
+            if not midi_file:
+                midi_file = self.results.get(raw_key)
 
         if midi_file:
             self.selected_midi_var.set(str(midi_file))
@@ -540,11 +557,13 @@ class YoutubeMidiApp:
             )
             return
 
-        results = ensure_clean_results(results)
+        results = ensure_clean_results(
+            results, include_vocals=bool(self.convert_vocals_midi_var.get())
+        )
         self.results = results
         self.update_selected_midi()
         self.log_message(f"Loaded converted folder: {results['base_dir']}")
-        self.log_message(f"Vocals MIDI: {results['vocal_midi']}")
+        self.log_message(f"Vocals MIDI: {results.get('vocal_midi')}")
         self.log_message(f"Accompaniment MIDI: {results['accompaniment_midi']}")
         self.log_message(f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}")
         self.log_message(
@@ -571,7 +590,9 @@ class YoutubeMidiApp:
             if path.name == name:
                 results = results_from_output_dir(path)
                 if results:
-                    results = ensure_clean_results(results)
+                    results = ensure_clean_results(
+                        results, include_vocals=bool(self.convert_vocals_midi_var.get())
+                    )
                     self.results = results
                     self.update_selected_midi()
                     self.log_message(f"Loaded converted folder: {results['base_dir']}")

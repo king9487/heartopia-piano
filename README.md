@@ -7,7 +7,8 @@
 - 支援 YouTube URL 轉 MIDI
 - 支援本地音樂檔轉 MIDI：`mp3`、`wav`、`m4a`、`flac`、`ogg`、`webm`、`aac`
 - 使用 Demucs 拆分 `vocals` / `accompaniment`
-- 使用 Basic Pitch 產生 MIDI
+- 預設只把 `no_vocals.wav` / `accompaniment` 用 Basic Pitch 轉成 MIDI
+- `vocals` MIDI 轉換是可選功能，預設關閉
 - Basic Pitch 後會另外產生 `clean_37key.mid`，先整理成適合 37 鍵遊戲的 MIDI
 - 支援 37 鍵遊戲鍵位 mapping
 - 支援 MIDI 清理：
@@ -72,13 +73,15 @@ CLI 版：
 1. 開啟 UI
 2. 貼上 YouTube URL
 3. 按 `Convert URL`
-4. 等待下載、拆音軌、轉 MIDI
-5. 選 `Vocals MIDI` 或 `Accompaniment MIDI`
+4. 等待下載、拆音軌、轉 `Accompaniment MIDI`
+5. 預設會選 `Accompaniment MIDI`
 6. `MIDI source` 預設選 `Clean 37-Key MIDI`；需要比較原始結果時可切到 `Raw MIDI`
 7. 按 `Preview` 查看會送出的鍵盤事件
 8. 按 `Play to Game`
 9. 倒數期間切回遊戲
 10. 播放中按 `F8` 停止
+
+預設不會轉 `Vocals MIDI`，因為目前遊戲播放通常以 `no_vocals.wav` 轉出的 accompaniment 更接近可用旋律，也能節省轉換時間。需要 vocals MIDI 時，先勾選 `Convert vocals MIDI` 再開始轉換。
 
 ### 本地音樂轉 MIDI
 
@@ -108,6 +111,8 @@ output\歌曲名稱或檔名
 - Raw MIDI：Basic Pitch 直接產生的原始 `.mid`
 - Clean 37-Key MIDI：工具整理後的 `clean_37key.mid`，預設用於遊戲播放
 
+預設只會在 `midi\accompaniment\` 產生 raw MIDI 和 `clean_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的 raw MIDI 和 clean MIDI。
+
 ## UI 參數
 
 ### Playback
@@ -118,6 +123,7 @@ output\歌曲名稱或檔名
   - `cuda:0`：使用 NVIDIA GPU
   - `cpu`：使用 CPU
   - `auto`：讓 Demucs 自己判斷
+- `Convert vocals MIDI`：預設關閉。開啟後會額外把 `vocals.wav` 轉成 MIDI，並產生 vocals 的 `clean_37key.mid`
 
 ### Timing
 

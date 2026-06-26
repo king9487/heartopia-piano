@@ -98,10 +98,10 @@ def results_from_output_dir(base_dir):
     vocal_midi = latest_midi_file(base_dir / "midi" / "vocals")
     accompaniment_midi = latest_midi_file(base_dir / "midi" / "accompaniment")
 
-    if not vocal_midi or not accompaniment_midi:
+    if not accompaniment_midi:
         return None
 
-    vocal_clean_midi = clean_37key_midi_path(vocal_midi)
+    vocal_clean_midi = clean_37key_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_clean_midi = clean_37key_midi_path(accompaniment_midi)
 
     return {
@@ -111,7 +111,9 @@ def results_from_output_dir(base_dir):
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
-        "vocal_clean_midi": vocal_clean_midi if vocal_clean_midi.exists() else None,
+        "vocal_clean_midi": (
+            vocal_clean_midi if vocal_clean_midi and vocal_clean_midi.exists() else None
+        ),
         "accompaniment_clean_midi": (
             accompaniment_clean_midi if accompaniment_clean_midi.exists() else None
         ),
@@ -132,11 +134,11 @@ def list_converted_outputs(output_root="output"):
     return sorted(converted, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def ensure_clean_results(results):
+def ensure_clean_results(results, include_vocals=False):
     if not results:
         return results
 
-    if results.get("vocal_midi"):
+    if include_vocals and results.get("vocal_midi"):
         results["vocal_clean_midi"] = ensure_clean_37key_midi(results["vocal_midi"])
     if results.get("accompaniment_midi"):
         results["accompaniment_clean_midi"] = ensure_clean_37key_midi(
@@ -280,7 +282,13 @@ def convert_audio_to_midi(audio_file, output_dir, cancel_token=None):
     return midi_file
 
 
-def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
+def youtube_to_midi(
+    url,
+    base_dir=None,
+    cancel_token=None,
+    demucs_device=None,
+    convert_vocals_midi=False,
+):
     base_dir = Path(base_dir) if base_dir else output_dir_for_url(url, cancel_token=cancel_token)
     download_dir = base_dir / "download"
     separated_dir = base_dir / "separated"
@@ -291,7 +299,12 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
     cached_results = results_from_output_dir(base_dir)
     if cached_results:
         print("Using cached conversion:", base_dir)
-        return ensure_clean_results(cached_results)
+        if convert_vocals_midi and not cached_results.get("vocal_midi"):
+            print("Cached output has no vocals MIDI. Converting vocals to MIDI...")
+            cached_results["vocal_midi"] = convert_audio_to_midi(
+                cached_results["vocals"], midi_dir / "vocals", cancel_token=cancel_token
+            )
+        return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
 
     print("Step 1: Downloading YouTube audio...")
     wav_file = download_youtube_audio(url, download_dir, cancel_token=cancel_token)
@@ -301,8 +314,13 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
         wav_file, separated_dir, cancel_token=cancel_token, device=demucs_device
     )
 
-    print("Step 3: Converting vocals to MIDI...")
-    vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+    vocal_midi = None
+    vocal_clean_midi = None
+    if convert_vocals_midi:
+        print("Step 3: Converting vocals to MIDI...")
+        vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+    else:
+        print("Step 3: Skipping vocals MIDI conversion.")
 
     print("Step 4: Converting accompaniment to MIDI...")
     accompaniment_midi = convert_audio_to_midi(
@@ -310,7 +328,8 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
     )
 
     print("Step 5: Generating Clean 37-Key MIDI files...")
-    vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
+    if vocal_midi:
+        vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
     accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
 
     return {
@@ -326,7 +345,13 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
     }
 
 
-def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_device=None):
+def audio_file_to_midi(
+    audio_file,
+    base_dir=None,
+    cancel_token=None,
+    demucs_device=None,
+    convert_vocals_midi=False,
+):
     base_dir = Path(base_dir) if base_dir else output_dir_for_audio_file(audio_file)
     download_dir = base_dir / "download"
     separated_dir = base_dir / "separated"
@@ -337,7 +362,12 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
     cached_results = results_from_output_dir(base_dir)
     if cached_results:
         print("Using cached conversion:", base_dir)
-        return ensure_clean_results(cached_results)
+        if convert_vocals_midi and not cached_results.get("vocal_midi"):
+            print("Cached output has no vocals MIDI. Converting vocals to MIDI...")
+            cached_results["vocal_midi"] = convert_audio_to_midi(
+                cached_results["vocals"], midi_dir / "vocals", cancel_token=cancel_token
+            )
+        return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
 
     print("Step 1: Preparing local audio...")
     wav_file = prepare_local_audio(audio_file, download_dir, cancel_token=cancel_token)
@@ -347,8 +377,13 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
         wav_file, separated_dir, cancel_token=cancel_token, device=demucs_device
     )
 
-    print("Step 3: Converting vocals to MIDI...")
-    vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+    vocal_midi = None
+    vocal_clean_midi = None
+    if convert_vocals_midi:
+        print("Step 3: Converting vocals to MIDI...")
+        vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+    else:
+        print("Step 3: Skipping vocals MIDI conversion.")
 
     print("Step 4: Converting accompaniment to MIDI...")
     accompaniment_midi = convert_audio_to_midi(
@@ -356,7 +391,8 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
     )
 
     print("Step 5: Generating Clean 37-Key MIDI files...")
-    vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
+    if vocal_midi:
+        vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
     accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
 
     return {
