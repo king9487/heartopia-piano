@@ -9,7 +9,7 @@
 - 使用 Demucs 拆分 `vocals` / `accompaniment`
 - 預設只把 `no_vocals.wav` / `accompaniment` 用 Basic Pitch 轉成 MIDI
 - `vocals` MIDI 轉換是可選功能，預設關閉
-- Basic Pitch 後會依序產生 `clean_37key.mid`、`ai_optimized_37key.mid`、`final_37key.mid`
+- Basic Pitch 後會依序產生 `clean_37key.mid`、`ai_optimized_37key.mid`、`pitch_corrected_37key.mid`、`final_37key.mid`
 - 支援 37 鍵遊戲鍵位 mapping
 - 支援 MIDI 清理：
   - 過濾太短的音
@@ -112,9 +112,10 @@ output\歌曲名稱或檔名
 - Raw MIDI：Basic Pitch 直接產生的原始 `.mid`
 - Clean 37-Key MIDI：規則引擎整理後的 `clean_37key.mid`
 - AI Optimized MIDI：AI/rule optimizer 產生的 `ai_optimized_37key.mid`
+- Pitch Corrected MIDI：依偵測到的調性校正後的 `pitch_corrected_37key.mid`
 - Final 37-Key MIDI：最後 smoothing 後的 `final_37key.mid`，預設用於 preview 和遊戲播放
 
-預設只會在 `midi\accompaniment\` 產生 raw MIDI、`clean_37key.mid`、`ai_optimized_37key.mid`、`final_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的同一組輸出。
+預設只會在 `midi\accompaniment\` 產生 raw MIDI、`clean_37key.mid`、`ai_optimized_37key.mid`、`pitch_corrected_37key.mid`、`final_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的同一組輸出。
 
 ## UI 參數
 
@@ -151,6 +152,7 @@ output\歌曲名稱或檔名
 raw MIDI
 -> clean_37key.mid
 -> ai_optimized_37key.mid
+-> pitch_corrected_37key.mid
 -> final_37key.mid
 ```
 
@@ -214,7 +216,33 @@ OpenAI 回傳結果會驗證：
 $env:OPENAI_API_KEY="你的 API key"
 ```
 
-無論 OpenAI 是否啟用或是否成功，工具都會產生 `ai_optimized_37key.mid`。接著會再做 MIDI smoothing，輸出最終播放用的 `final_37key.mid`。
+無論 OpenAI 是否啟用或是否成功，工具都會產生 `ai_optimized_37key.mid`。接著會做 pitch correction 和 MIDI smoothing，輸出最終播放用的 `final_37key.mid`。
+
+### Pitch Correction
+
+Pitch correction 會在 AI/rule optimizer 後、final smoothing 前執行：
+
+```text
+ai_optimized_37key.mid
+-> pitch_corrected_37key.mid
+-> final_37key.mid
+```
+
+它會根據 note 的總音長和 velocity 權重，測試 12 個大調與 12 個小調，選出最可能的調性，例如：
+
+```text
+Detected key: C major
+```
+
+校正規則：
+
+- 音符在偵測到的音階內：保留
+- 音符不在音階內：嘗試往 ±1 或 ±2 半音移到最近的音階內音
+- 校正方向會偏好讓旋律移動更平滑
+- 太短且離調的音會丟掉
+- velocity 低且離調的音會丟掉
+- 如果音符造成大於 12 半音的突兀跳躍，並且馬上回到原旋律附近，會丟掉或校正
+- 找不到合理校正時會丟掉
 
 - `Min note ms`：移除短於此時間的音符
 - `Velocity`：移除力度低於此值的音符
@@ -339,7 +367,7 @@ ui_app.py               Tkinter 圖形介面
 cli_app.py              命令列入口
 converter.py            YouTube/本地音訊轉 MIDI
 midi_rule_engine.py     MIDI 規則引擎，產生 clean_37key.mid
-midi_ai_optimizer.py    AI/Rule MIDI optimizer 與 smoothing，產生 ai_optimized_37key.mid / final_37key.mid
+midi_ai_optimizer.py    AI/Rule MIDI optimizer、pitch correction 與 smoothing
 midi_to_keyboard.py     MIDI preview、mapping、鍵盤播放
 tools.py                外部工具尋找、subprocess、取消邏輯
 requirements.txt        Python 依賴

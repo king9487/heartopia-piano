@@ -95,8 +95,12 @@ def main():
     print("Accompaniment Clean 37-Key MIDI:", results.get("accompaniment_clean_midi"))
     print("Vocals AI Optimized MIDI:", results.get("vocal_ai_optimized_midi"))
     print("Accompaniment AI Optimized MIDI:", results.get("accompaniment_ai_optimized_midi"))
+    print("Vocals Pitch Corrected MIDI:", results.get("vocal_pitch_corrected_midi"))
+    print("Accompaniment Pitch Corrected MIDI:", results.get("accompaniment_pitch_corrected_midi"))
     print("Vocals Final 37-Key MIDI:", results.get("vocal_final_midi"))
     print("Accompaniment Final 37-Key MIDI:", results.get("accompaniment_final_midi"))
+    print("Vocals detected key:", results.get("vocal_detected_key"))
+    print("Accompaniment detected key:", results.get("accompaniment_detected_key"))
 
     if not ask_yes_no("\nPreview keyboard events from a MIDI file?", default=True):
         return

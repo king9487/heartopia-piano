@@ -8,7 +8,11 @@ from midi_to_keyboard import DEFAULT_NOTE_MAP
 
 
 AI_OPTIMIZED_MIDI_NAME = "ai_optimized_37key.mid"
+PITCH_CORRECTED_MIDI_NAME = "pitch_corrected_37key.mid"
 FINAL_37KEY_MIDI_NAME = "final_37key.mid"
+PITCH_CLASS_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+MAJOR_SCALE = (0, 2, 4, 5, 7, 9, 11)
+MINOR_SCALE = (0, 2, 3, 5, 7, 8, 10)
 OPTIMIZER_NONE = "none"
 OPTIMIZER_RULE = "rule"
 OPTIMIZER_OPENAI = "openai"
@@ -287,6 +291,141 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     return output_midi
 
 
+def detect_song_key(notes):
+    notes = validate_note_dicts(notes)
+    best_score = -1
+    best_root = 0
+    best_mode = "major"
+
+    for root in range(12):
+        for mode, intervals in (("major", MAJOR_SCALE), ("minor", MINOR_SCALE)):
+            scale = {(root + interval) % 12 for interval in intervals}
+            score = 0
+            for note in notes:
+                if note["note"] % 12 in scale:
+                    score += note["duration_ms"] * max(1, note["velocity"])
+            if score > best_score:
+                best_score = score
+                best_root = root
+                best_mode = mode
+
+    scale = {
+        (best_root + interval) % 12
+        for interval in (MAJOR_SCALE if best_mode == "major" else MINOR_SCALE)
+    }
+    return {
+        "root": best_root,
+        "mode": best_mode,
+        "scale": scale,
+        "name": f"{PITCH_CLASS_NAMES[best_root]} {best_mode}",
+    }
+
+
+def nearest_in_scale_candidates(note_number, scale, note_map=None, max_distance=2):
+    note_map = note_map or DEFAULT_NOTE_MAP
+    lowest = min(note_map)
+    highest = max(note_map)
+    candidates = []
+    for distance in range(1, max_distance + 1):
+        for direction in (-1, 1):
+            candidate = note_number + (direction * distance)
+            if lowest <= candidate <= highest and candidate % 12 in scale:
+                candidates.append((candidate, distance, direction))
+    return candidates
+
+
+def is_jump_return(notes, index):
+    if index <= 0 or index + 1 >= len(notes):
+        return False
+
+    previous_note = notes[index - 1]["note"]
+    current_note = notes[index]["note"]
+    next_note = notes[index + 1]["note"]
+    current_start = notes[index]["start_ms"]
+    next_start = notes[index + 1]["start_ms"]
+    return (
+        abs(current_note - previous_note) > 12
+        and abs(next_note - previous_note) <= 3
+        and next_start - current_start <= 350
+    )
+
+
+def choose_pitch_correction(note, previous_note, next_note, scale, note_map=None):
+    candidates = nearest_in_scale_candidates(note["note"], scale, note_map=note_map)
+    if not candidates:
+        return None
+
+    def movement_score(candidate):
+        corrected_note, distance, direction = candidate
+        score = distance * 10
+        if previous_note is not None:
+            score += abs(corrected_note - previous_note["note"])
+        if next_note is not None:
+            score += abs(next_note["note"] - corrected_note) * 0.5
+        score += 0.2 if direction > 0 else 0
+        return score
+
+    return sorted(candidates, key=movement_score)[0][0]
+
+
+def pitch_correct_notes(notes, options=None):
+    options = options or {}
+    note_map = options.get("note_map") or DEFAULT_NOTE_MAP
+    min_short_ms = int(options.get("pitch_short_note_ms", 70))
+    low_velocity = int(options.get("pitch_low_velocity", 35))
+    notes = validate_note_dicts(notes, note_map=note_map)
+    key_info = detect_song_key(notes)
+    scale = key_info["scale"]
+
+    corrected = []
+    for index, note in enumerate(notes):
+        previous_note = notes[index - 1] if index > 0 else None
+        next_note = notes[index + 1] if index + 1 < len(notes) else None
+        in_key = note["note"] % 12 in scale
+        jump_return = is_jump_return(notes, index)
+
+        if in_key and not jump_return:
+            corrected.append(note)
+            continue
+
+        if note["duration_ms"] <= min_short_ms and not in_key:
+            continue
+        if note["velocity"] <= low_velocity and not in_key:
+            continue
+
+        corrected_note = choose_pitch_correction(
+            note,
+            previous_note,
+            next_note,
+            scale,
+            note_map=note_map,
+        )
+        if corrected_note is None:
+            continue
+
+        fixed = dict(note)
+        fixed["note"] = corrected_note
+        corrected.append(fixed)
+
+    return validate_note_dicts(corrected, note_map=note_map), key_info
+
+
+def pitch_correct_37key_midi(input_midi, output_midi=None, options=None):
+    input_midi = Path(input_midi)
+    output_midi = (
+        Path(output_midi)
+        if output_midi
+        else input_midi.with_name(PITCH_CORRECTED_MIDI_NAME)
+    )
+    corrected_notes, key_info = pitch_correct_notes(midi_notes_to_dicts(input_midi), options=options)
+    write_clean_midi(dicts_to_rule_notes(corrected_notes), output_midi)
+    return output_midi, key_info
+
+
+def detect_key_for_midi(input_midi):
+    return detect_song_key(midi_notes_to_dicts(input_midi))["name"]
+
+
 def smooth_note_events(notes, options=None):
     options = options or {}
     min_duration_ms = max(20, int(options.get("final_min_duration_ms", 45)))
@@ -329,12 +468,18 @@ def smooth_37key_midi(input_midi, output_midi=None, options=None):
 def post_process_37key_midi(clean_midi, options=None):
     clean_midi = Path(clean_midi)
     ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
+    pitch_corrected_midi = clean_midi.with_name(PITCH_CORRECTED_MIDI_NAME)
     final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
 
     optimize_37key_midi(clean_midi, output_midi=ai_midi, options=options)
-    smooth_37key_midi(ai_midi, output_midi=final_midi, options=options)
+    _, key_info = pitch_correct_37key_midi(
+        ai_midi, output_midi=pitch_corrected_midi, options=options
+    )
+    smooth_37key_midi(pitch_corrected_midi, output_midi=final_midi, options=options)
     return {
         "clean_midi": clean_midi,
         "ai_optimized_midi": ai_midi,
+        "pitch_corrected_midi": pitch_corrected_midi,
         "final_midi": final_midi,
+        "detected_key": key_info["name"],
     }

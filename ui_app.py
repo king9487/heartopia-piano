@@ -413,7 +413,9 @@ class YoutubeMidiApp:
                 self.selected_midi_var.set(str(payload["final_midi"]))
                 self.status_var.set("MIDI optimized")
                 self.log_message(f"AI optimized MIDI: {payload['ai_optimized_midi']}")
+                self.log_message(f"Pitch corrected MIDI: {payload['pitch_corrected_midi']}")
                 self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
+                self.log_message(f"Detected key: {payload['detected_key']}")
             elif kind == "optimize_error":
                 self.status_var.set("MIDI optimization failed")
                 messagebox.showerror("MIDI optimization failed", payload)
@@ -489,7 +491,14 @@ class YoutubeMidiApp:
             self.queue.put(
                 ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
             )
+            self.queue.put(
+                (
+                    "log",
+                    f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}",
+                )
+            )
             self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
+            self.queue.put(("log", f"Vocals detected key: {results.get('vocal_detected_key')}"))
             self.queue.put(
                 (
                     "log",
@@ -503,7 +512,17 @@ class YoutubeMidiApp:
                 )
             )
             self.queue.put(
+                (
+                    "log",
+                    "Accompaniment Pitch Corrected MIDI: "
+                    f"{results['accompaniment_pitch_corrected_midi']}",
+                )
+            )
+            self.queue.put(
                 ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
+            )
+            self.queue.put(
+                ("log", f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
             )
             self.queue.put(("converted", results))
         except CancelledError:
@@ -535,7 +554,14 @@ class YoutubeMidiApp:
             self.queue.put(
                 ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
             )
+            self.queue.put(
+                (
+                    "log",
+                    f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}",
+                )
+            )
             self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
+            self.queue.put(("log", f"Vocals detected key: {results.get('vocal_detected_key')}"))
             self.queue.put(
                 (
                     "log",
@@ -549,7 +575,17 @@ class YoutubeMidiApp:
                 )
             )
             self.queue.put(
+                (
+                    "log",
+                    "Accompaniment Pitch Corrected MIDI: "
+                    f"{results['accompaniment_pitch_corrected_midi']}",
+                )
+            )
+            self.queue.put(
                 ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
+            )
+            self.queue.put(
+                ("log", f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
             )
             self.queue.put(("converted", results))
         except CancelledError:
@@ -630,7 +666,9 @@ class YoutubeMidiApp:
         self.log_message(f"Accompaniment MIDI: {results['accompaniment_midi']}")
         self.log_message(f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}")
         self.log_message(f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
+        self.log_message(f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}")
         self.log_message(f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}")
+        self.log_message(f"Vocals detected key: {results.get('vocal_detected_key')}")
         self.log_message(
             f"Accompaniment Clean 37-Key MIDI: {results.get('accompaniment_clean_midi')}"
         )
@@ -638,8 +676,13 @@ class YoutubeMidiApp:
             f"Accompaniment AI Optimized MIDI: {results.get('accompaniment_ai_optimized_midi')}"
         )
         self.log_message(
+            "Accompaniment Pitch Corrected MIDI: "
+            f"{results.get('accompaniment_pitch_corrected_midi')}"
+        )
+        self.log_message(
             f"Accompaniment Final 37-Key MIDI: {results.get('accompaniment_final_midi')}"
         )
+        self.log_message(f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
         self.status_var.set("Converted folder loaded")
 
     def refresh_converted_outputs(self):
@@ -671,7 +714,11 @@ class YoutubeMidiApp:
                     self.log_message(
                         f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}"
                     )
+                    self.log_message(
+                        f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}"
+                    )
                     self.log_message(f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}")
+                    self.log_message(f"Vocals detected key: {results.get('vocal_detected_key')}")
                     self.log_message(
                         f"Accompaniment Clean 37-Key MIDI: {results.get('accompaniment_clean_midi')}"
                     )
@@ -680,7 +727,14 @@ class YoutubeMidiApp:
                         f"{results.get('accompaniment_ai_optimized_midi')}"
                     )
                     self.log_message(
+                        "Accompaniment Pitch Corrected MIDI: "
+                        f"{results.get('accompaniment_pitch_corrected_midi')}"
+                    )
+                    self.log_message(
                         f"Accompaniment Final 37-Key MIDI: {results.get('accompaniment_final_midi')}"
+                    )
+                    self.log_message(
+                        f"Accompaniment detected key: {results.get('accompaniment_detected_key')}"
                     )
                     self.status_var.set("Converted folder loaded")
                 return
