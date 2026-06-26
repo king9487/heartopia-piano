@@ -13,6 +13,7 @@ from converter import (
     results_from_output_dir,
     youtube_to_midi,
 )
+from midi_ai_optimizer import optimize_37key_midi
 from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
 from tools import (
     CancellationToken,
@@ -60,6 +61,7 @@ class YoutubeMidiApp:
         self.melody_only_var = tk.BooleanVar(value=False)
         self.melody_max_notes_var = tk.IntVar(value=1)
         self.melody_window_var = tk.IntVar(value=80)
+        self.optimizer_mode_var = tk.StringVar(value="Rule")
         self.status_var = tk.StringVar(value="Ready")
 
         self.build_ui()
@@ -303,6 +305,17 @@ class YoutubeMidiApp:
             variable=self.midi_source_var,
             command=self.update_selected_midi,
         ).grid(row=2, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Label(midi_panel, text="Optimizer").grid(row=2, column=3, sticky="e", pady=(8, 0))
+        ttk.Combobox(
+            midi_panel,
+            textvariable=self.optimizer_mode_var,
+            values=("None", "Rule", "OpenAI"),
+            state="readonly",
+            width=8,
+        ).grid(row=2, column=4, sticky="w", padx=(4, 0), pady=(8, 0))
+        ttk.Button(midi_panel, text="Optimize MIDI", command=self.start_optimize_midi).grid(
+            row=2, column=5, sticky="w", padx=(8, 0), pady=(8, 0)
+        )
 
         selected = ttk.Label(
             self.root,
@@ -389,6 +402,13 @@ class YoutubeMidiApp:
                 self.apply_topmost()
                 self.status_var.set("Keyboard playback failed")
                 messagebox.showerror("Keyboard playback failed", payload)
+            elif kind == "optimize_done":
+                self.selected_midi_var.set(str(payload))
+                self.status_var.set("MIDI optimized")
+                self.log_message(f"AI optimized MIDI: {payload}")
+            elif kind == "optimize_error":
+                self.status_var.set("MIDI optimization failed")
+                messagebox.showerror("MIDI optimization failed", payload)
 
         self.root.after(100, self.poll_queue)
 
@@ -669,6 +689,43 @@ class YoutubeMidiApp:
                 break
         if count == 0:
             self.log_message("No mapped note events found in this MIDI file.")
+
+    def start_optimize_midi(self):
+        midi_path = self.get_selected_midi()
+        if not midi_path:
+            return
+
+        mode = self.optimizer_mode_var.get().strip().lower()
+        if mode == "none":
+            messagebox.showwarning("Optimizer disabled", "Choose Rule or OpenAI first.")
+            return
+
+        try:
+            options = {
+                "mode": mode,
+                "max_notes_per_window": max(1, min(int(self.melody_max_notes_var.get()), 3)),
+                "min_note_duration_ms": int(self.min_note_duration_var.get()),
+            }
+        except (TypeError, ValueError):
+            messagebox.showerror("Invalid setting", "Optimizer settings must be numbers.")
+            return
+
+        self.status_var.set("Optimizing MIDI")
+        self.log_message(f"Optimizing MIDI with {self.optimizer_mode_var.get()} mode: {midi_path}")
+        thread = threading.Thread(
+            target=self.optimize_worker,
+            args=(midi_path, options),
+            daemon=True,
+        )
+        thread.start()
+
+    def optimize_worker(self, midi_path, options):
+        try:
+            output_midi = Path(midi_path).with_name("ai_optimized_37key.mid")
+            result = optimize_37key_midi(midi_path, output_midi=output_midi, options=options)
+            self.queue.put(("optimize_done", result))
+        except Exception as exc:
+            self.queue.put(("optimize_error", str(exc)))
 
     def start_keyboard_playback(self):
         midi_path = self.get_selected_midi()

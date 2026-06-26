@@ -10,6 +10,7 @@
 - 預設只把 `no_vocals.wav` / `accompaniment` 用 Basic Pitch 轉成 MIDI
 - `vocals` MIDI 轉換是可選功能，預設關閉
 - Basic Pitch 後會另外產生 `clean_37key.mid`，先整理成適合 37 鍵遊戲的 MIDI
+- 可選擇再把 37-key MIDI 優化成 `ai_optimized_37key.mid`
 - 支援 37 鍵遊戲鍵位 mapping
 - 支援 MIDI 清理：
   - 過濾太短的音
@@ -77,9 +78,10 @@ CLI 版：
 5. 預設會選 `Accompaniment MIDI`
 6. `MIDI source` 預設選 `Clean 37-Key MIDI`；需要比較原始結果時可切到 `Raw MIDI`
 7. 按 `Preview` 查看會送出的鍵盤事件
-8. 按 `Play to Game`
-9. 倒數期間切回遊戲
-10. 播放中按 `F8` 停止
+8. 需要再整理旋律時，可選 `Optimizer = Rule` 或 `OpenAI`，再按 `Optimize MIDI`
+9. 按 `Play to Game`
+10. 倒數期間切回遊戲
+11. 播放中按 `F8` 停止
 
 預設不會轉 `Vocals MIDI`，因為目前遊戲播放通常以 `no_vocals.wav` 轉出的 accompaniment 更接近可用旋律，也能節省轉換時間。需要 vocals MIDI 時，先勾選 `Convert vocals MIDI` 再開始轉換。
 
@@ -110,6 +112,7 @@ output\歌曲名稱或檔名
 
 - Raw MIDI：Basic Pitch 直接產生的原始 `.mid`
 - Clean 37-Key MIDI：工具整理後的 `clean_37key.mid`，預設用於遊戲播放
+- AI Optimized MIDI：按 `Optimize MIDI` 後產生的 `ai_optimized_37key.mid`
 
 預設只會在 `midi\accompaniment\` 產生 raw MIDI 和 `clean_37key.mid`。如果有勾選 `Convert vocals MIDI`，才會另外在 `midi\vocals\` 產生 vocals 的 raw MIDI 和 clean MIDI。
 
@@ -124,6 +127,11 @@ output\歌曲名稱或檔名
   - `cpu`：使用 CPU
   - `auto`：讓 Demucs 自己判斷
 - `Convert vocals MIDI`：預設關閉。開啟後會額外把 `vocals.wav` 轉成 MIDI，並產生 vocals 的 `clean_37key.mid`
+- `Optimizer`：
+  - `None`：不做額外優化
+  - `Rule`：預設模式，使用本地規則優化，不需要網路或 API key
+  - `OpenAI`：把 MIDI note JSON 分段送給 LLM 優化，輸出會驗證，失敗會回退到 `Rule`
+- `Optimize MIDI`：將目前選中的 MIDI 優化成同資料夾內的 `ai_optimized_37key.mid`，完成後自動選取該檔案
 
 ### Timing
 
@@ -156,6 +164,46 @@ score = velocity * 1.0 + duration_ms * 0.2 + pitch_stability_bonus + pitch_bonus
 ```
 
 `pitch_stability_bonus` 會偏好原本就在 37 鍵範圍內，或只需要少量八度平移的音。`pitch_bonus` 會在偏好旋律時稍微偏向較高的音，讓伴奏 MIDI 比較容易留下主旋律線。
+
+### AI Optimizer
+
+AI Optimizer 是在鍵盤播放前額外處理 MIDI note 的步驟。它不會控制鍵盤、不會注入遊戲、不會使用隱藏 driver，也不會做偵測規避；它只讀取 MIDI、修改 note events，然後寫出新的 MIDI 檔。
+
+輸入 note 格式大致是：
+
+```json
+{
+  "start_ms": 0,
+  "duration_ms": 120,
+  "note": 64,
+  "velocity": 90
+}
+```
+
+`Rule` 模式會：
+
+1. 以 `50ms` 視窗分組
+2. 每組保留最多 `1` 到 `3` 個音
+3. 偏好 velocity 高、duration 長的音
+4. 偏好平滑的 pitch movement
+5. 避免突然八度跳躍
+6. 避免孤立的極短音
+
+`OpenAI` 模式會把 MIDI 分成小段，例如約每 `8` 秒一段，避免一次送整首歌。Prompt 會要求模型只回傳 JSON、保留主旋律和重要和聲、不要創作新歌、不要輸出 37 鍵範圍外的音。
+
+OpenAI 回傳結果會驗證：
+
+- 必須是合法 JSON
+- `note` 必須在 37 鍵範圍內
+- `duration_ms` 必須大於 `0`
+- `start_ms` 不能小於 `0`
+- `velocity` 必須是 `1` 到 `127`
+
+如果 OpenAI 回傳無效，該段會自動回退到 `Rule` 模式。若要使用 OpenAI 模式，需要設定環境變數：
+
+```powershell
+$env:OPENAI_API_KEY="你的 API key"
+```
 
 - `Min note ms`：移除短於此時間的音符
 - `Velocity`：移除力度低於此值的音符
@@ -280,6 +328,7 @@ ui_app.py               Tkinter 圖形介面
 cli_app.py              命令列入口
 converter.py            YouTube/本地音訊轉 MIDI
 midi_rule_engine.py     MIDI 規則引擎，產生 clean_37key.mid
+midi_ai_optimizer.py    AI/Rule MIDI optimizer，產生 ai_optimized_37key.mid
 midi_to_keyboard.py     MIDI preview、mapping、鍵盤播放
 tools.py                外部工具尋找、subprocess、取消邏輯
 requirements.txt        Python 依賴
