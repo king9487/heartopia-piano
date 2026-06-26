@@ -2,7 +2,11 @@ from pathlib import Path
 import json
 import re
 
+from midi_to_keyboard import DEFAULT_37KEY_CLEAN_OPTIONS, DEFAULT_NOTE_MAP, convert_to_37key_midi
 from tools import find_executable, find_ffmpeg_location, run, run_capture
+
+
+CLEAN_37KEY_MIDI_NAME = "clean_37key.mid"
 
 
 def sanitize_filename(value, max_length=120):
@@ -54,12 +58,36 @@ def output_dir_for_audio_file(audio_file, output_root="output"):
     return Path(output_root) / folder_name
 
 
-def latest_midi_file(output_dir):
+def latest_midi_file(output_dir, include_clean=False):
     output_dir = Path(output_dir)
-    midi_files = sorted(
-        output_dir.glob("*.mid"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
+    midi_files = list(output_dir.glob("*.mid"))
+    if not include_clean:
+        midi_files = [path for path in midi_files if path.name != CLEAN_37KEY_MIDI_NAME]
+
+    midi_files = sorted(midi_files, key=lambda path: path.stat().st_mtime, reverse=True)
     return midi_files[0] if midi_files else None
+
+
+def clean_37key_midi_path(raw_midi):
+    return Path(raw_midi).with_name(CLEAN_37KEY_MIDI_NAME)
+
+
+def ensure_clean_37key_midi(raw_midi, options=None):
+    output_midi = clean_37key_midi_path(raw_midi)
+    if output_midi.exists() and output_midi.stat().st_mtime >= Path(raw_midi).stat().st_mtime:
+        print("Using existing Clean 37-Key MIDI:", output_midi)
+        return output_midi
+
+    clean_options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **(options or {})}
+    print("Generating Clean 37-Key MIDI:", output_midi)
+    return Path(
+        convert_to_37key_midi(
+            raw_midi,
+            output_midi,
+            DEFAULT_NOTE_MAP,
+            clean_options,
+        )
+    )
 
 
 def results_from_output_dir(base_dir):
@@ -73,6 +101,9 @@ def results_from_output_dir(base_dir):
     if not vocal_midi or not accompaniment_midi:
         return None
 
+    vocal_clean_midi = clean_37key_midi_path(vocal_midi)
+    accompaniment_clean_midi = clean_37key_midi_path(accompaniment_midi)
+
     return {
         "base_dir": base_dir,
         "wav_file": wav_file,
@@ -80,6 +111,10 @@ def results_from_output_dir(base_dir):
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_clean_midi": vocal_clean_midi if vocal_clean_midi.exists() else None,
+        "accompaniment_clean_midi": (
+            accompaniment_clean_midi if accompaniment_clean_midi.exists() else None
+        ),
         "cached": True,
     }
 
@@ -95,6 +130,19 @@ def list_converted_outputs(output_root="output"):
             converted.append(path)
 
     return sorted(converted, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def ensure_clean_results(results):
+    if not results:
+        return results
+
+    if results.get("vocal_midi"):
+        results["vocal_clean_midi"] = ensure_clean_37key_midi(results["vocal_midi"])
+    if results.get("accompaniment_midi"):
+        results["accompaniment_clean_midi"] = ensure_clean_37key_midi(
+            results["accompaniment_midi"]
+        )
+    return results
 
 
 def download_youtube_audio(url, output_dir, cancel_token=None):
@@ -243,7 +291,7 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
     cached_results = results_from_output_dir(base_dir)
     if cached_results:
         print("Using cached conversion:", base_dir)
-        return cached_results
+        return ensure_clean_results(cached_results)
 
     print("Step 1: Downloading YouTube audio...")
     wav_file = download_youtube_audio(url, download_dir, cancel_token=cancel_token)
@@ -261,6 +309,10 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
+    print("Step 5: Generating Clean 37-Key MIDI files...")
+    vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
+    accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
+
     return {
         "base_dir": base_dir,
         "wav_file": wav_file,
@@ -268,6 +320,8 @@ def youtube_to_midi(url, base_dir=None, cancel_token=None, demucs_device=None):
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_clean_midi": vocal_clean_midi,
+        "accompaniment_clean_midi": accompaniment_clean_midi,
         "cached": False,
     }
 
@@ -283,7 +337,7 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
     cached_results = results_from_output_dir(base_dir)
     if cached_results:
         print("Using cached conversion:", base_dir)
-        return cached_results
+        return ensure_clean_results(cached_results)
 
     print("Step 1: Preparing local audio...")
     wav_file = prepare_local_audio(audio_file, download_dir, cancel_token=cancel_token)
@@ -301,6 +355,10 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
+    print("Step 5: Generating Clean 37-Key MIDI files...")
+    vocal_clean_midi = ensure_clean_37key_midi(vocal_midi)
+    accompaniment_clean_midi = ensure_clean_37key_midi(accompaniment_midi)
+
     return {
         "base_dir": base_dir,
         "wav_file": wav_file,
@@ -308,5 +366,7 @@ def audio_file_to_midi(audio_file, base_dir=None, cancel_token=None, demucs_devi
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_clean_midi": vocal_clean_midi,
+        "accompaniment_clean_midi": accompaniment_clean_midi,
         "cached": False,
     }

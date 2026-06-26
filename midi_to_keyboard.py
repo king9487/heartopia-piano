@@ -15,6 +15,14 @@ OCTAVE_FIT_SMART = "smart"
 SMART_MAX_RANGE_DISTANCE = 24
 SMART_MIN_OUT_OF_RANGE_DURATION = 0.08
 SMART_MIN_OUT_OF_RANGE_VELOCITY = 35
+DEFAULT_37KEY_CLEAN_OPTIONS = {
+    "min_note_duration_ms": 35,
+    "velocity_threshold": 12,
+    "max_simultaneous_notes": 3,
+    "out_of_range_mode": OCTAVE_FIT_SMART,
+    "prefer_melody": True,
+    "quantize_ms": None,
+}
 
 
 DEFAULT_NOTE_MAP = {
@@ -280,6 +288,148 @@ def apply_melody_only(note_events, melody_window=0.08, melody_max_notes=1):
         )
 
     return sorted(selected, key=lambda event: (event.start, event.note))
+
+
+def fit_note_for_37key_midi(note, note_map, out_of_range_mode):
+    if note in note_map:
+        return note
+
+    if out_of_range_mode in (OCTAVE_FIT_OFF, OCTAVE_FIT_DROP):
+        return None
+
+    lowest, highest = playable_note_range(note_map)
+    if lowest is None:
+        return None
+
+    if out_of_range_mode == OCTAVE_FIT_SMART:
+        if distance_from_range(note, lowest, highest) > SMART_MAX_RANGE_DISTANCE:
+            return None
+        return octave_shift_note(note, note_map)
+
+    if out_of_range_mode in (OCTAVE_FIT_OCTAVE_SHIFT, OCTAVE_FIT_SHIFT):
+        return octave_shift_note(note, note_map)
+
+    return None
+
+
+def rank_37key_event(event, prefer_melody=True):
+    duration_ms = event.duration * 1000
+    pitch_bonus = event.note * 0.08 if prefer_melody else 0
+    return event.velocity * 1.0 + duration_ms * 0.2 + pitch_bonus
+
+
+def group_37key_events(note_events, window_seconds, max_simultaneous_notes, prefer_melody):
+    if max_simultaneous_notes is None or max_simultaneous_notes <= 0:
+        return note_events
+
+    if window_seconds <= 0:
+        window_seconds = 0.03
+
+    by_window = {}
+    for event in note_events:
+        window_key = int(event.start / window_seconds)
+        by_window.setdefault(window_key, []).append(event)
+
+    selected = []
+    for events in by_window.values():
+        selected.extend(
+            sorted(
+                events,
+                key=lambda event: rank_37key_event(event, prefer_melody=prefer_melody),
+                reverse=True,
+            )[:max_simultaneous_notes]
+        )
+
+    return sorted(selected, key=lambda event: (event.start, event.note))
+
+
+def quantize_seconds(value, quantize_ms):
+    if not quantize_ms:
+        return value
+
+    quantum = quantize_ms / 1000
+    if quantum <= 0:
+        return value
+
+    return round(value / quantum) * quantum
+
+
+def write_clean_midi(note_events, output_midi, quantize_ms=None):
+    output_midi = str(output_midi)
+    ticks_per_beat = 480
+    tempo = mido.bpm2tempo(120)
+    midi = mido.MidiFile(ticks_per_beat=ticks_per_beat)
+    track = mido.MidiTrack()
+    midi.tracks.append(track)
+    track.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
+
+    timed_messages = []
+    min_duration = (quantize_ms / 1000) if quantize_ms else 0.001
+    for event in note_events:
+        start = max(0.0, quantize_seconds(event.start, quantize_ms))
+        end = max(0.0, quantize_seconds(event.end, quantize_ms))
+        if end <= start:
+            end = start + min_duration
+
+        velocity = max(1, min(int(event.velocity), 127))
+        timed_messages.append((start, 1, mido.Message("note_on", note=event.note, velocity=velocity)))
+        timed_messages.append((end, 0, mido.Message("note_off", note=event.note, velocity=0)))
+
+    timed_messages.sort(key=lambda item: (item[0], item[1]))
+
+    previous_time = 0.0
+    for timestamp, _, message in timed_messages:
+        delta_seconds = max(0.0, timestamp - previous_time)
+        message.time = int(round(mido.second2tick(delta_seconds, ticks_per_beat, tempo)))
+        track.append(message)
+        previous_time = timestamp
+
+    track.append(mido.MetaMessage("end_of_track", time=0))
+    midi.save(output_midi)
+
+
+def convert_to_37key_midi(input_midi, output_midi, note_map=None, options=None):
+    note_map = note_map or DEFAULT_NOTE_MAP
+    options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **(options or {})}
+    min_note_duration = max(0, int(options.get("min_note_duration_ms", 0))) / 1000
+    velocity_threshold = max(0, min(int(options.get("velocity_threshold", 0)), 127))
+    max_simultaneous_notes = int(options.get("max_simultaneous_notes") or 0)
+    out_of_range_mode = options.get("out_of_range_mode") or OCTAVE_FIT_SMART
+    prefer_melody = bool(options.get("prefer_melody", True))
+    quantize_ms = options.get("quantize_ms")
+    if quantize_ms is not None:
+        quantize_ms = max(1, int(quantize_ms))
+
+    clean_events = []
+    for start, end, raw_note, velocity in extract_raw_note_events(
+        input_midi, velocity_threshold=velocity_threshold
+    ):
+        duration = end - start
+        if duration < min_note_duration:
+            continue
+
+        note = fit_note_for_37key_midi(raw_note, note_map, out_of_range_mode)
+        if note is None:
+            continue
+
+        clean_events.append(
+            CleanNoteEvent(
+                start=start,
+                end=end,
+                note=note,
+                key=note_map[note],
+                velocity=velocity,
+            )
+        )
+
+    clean_events = group_37key_events(
+        clean_events,
+        window_seconds=0.03,
+        max_simultaneous_notes=max_simultaneous_notes,
+        prefer_melody=prefer_melody,
+    )
+    write_clean_midi(clean_events, output_midi, quantize_ms=quantize_ms)
+    return output_midi
 
 
 def build_clean_note_events(

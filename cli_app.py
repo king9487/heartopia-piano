@@ -8,14 +8,21 @@ from tools import check_cli_dependencies, default_demucs_device, format_command_
 
 def choose_midi_file(results):
     choices = {
-        "1": ("vocals", results["vocal_midi"]),
-        "2": ("accompaniment", results["accompaniment_midi"]),
+        "1": ("vocals clean 37-key", results.get("vocal_clean_midi") or results["vocal_midi"]),
+        "2": (
+            "accompaniment clean 37-key",
+            results.get("accompaniment_clean_midi") or results["accompaniment_midi"],
+        ),
+        "3": ("vocals raw", results["vocal_midi"]),
+        "4": ("accompaniment raw", results["accompaniment_midi"]),
     }
 
     print("\nChoose MIDI for keyboard output:")
-    print("1. Vocals")
-    print("2. Accompaniment")
-    choice = input("Select 1 or 2 [1]: ").strip() or "1"
+    print("1. Vocals Clean 37-Key MIDI")
+    print("2. Accompaniment Clean 37-Key MIDI")
+    print("3. Vocals Raw MIDI")
+    print("4. Accompaniment Raw MIDI")
+    choice = input("Select 1-4 [1]: ").strip() or "1"
 
     label, midi_file = choices.get(choice, choices["1"])
     print(f"Selected {label} MIDI: {midi_file}")
@@ -56,6 +63,8 @@ def main():
     print("Accompaniment WAV:", results["no_vocals"])
     print("Vocals MIDI:", results["vocal_midi"])
     print("Accompaniment MIDI:", results["accompaniment_midi"])
+    print("Vocals Clean 37-Key MIDI:", results.get("vocal_clean_midi"))
+    print("Accompaniment Clean 37-Key MIDI:", results.get("accompaniment_clean_midi"))
 
     if not ask_yes_no("\nPreview keyboard events from a MIDI file?", default=True):
         return
