@@ -5,4 +5,5 @@ torchaudio==2.3.1+cu121
 demucs
 basic-pitch
 mido
+python-rtmidi
 keyboard

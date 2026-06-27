@@ -1,10 +1,13 @@
+import bisect
 from pathlib import Path
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import keyboard
+import mido
 
 from converter import (
     audio_file_to_midi,
@@ -13,7 +16,20 @@ from converter import (
     results_from_output_dir,
     youtube_to_midi,
 )
-from midi_ai_optimizer import post_process_37key_midi
+from midi_ai_optimizer import (
+    AI_OPTIMIZED_MIDI_NAME,
+    FINAL_37KEY_MIDI_NAME,
+    PITCH_CORRECTED_MIDI_NAME,
+    post_process_37key_midi,
+)
+from midi_editor import (
+    EDITED_37KEY_MIDI_NAME,
+    find_suspicious_notes,
+    load_editor_notes,
+    save_edited_midi,
+)
+from midi_range import CHORUS_MIDI_NAME, export_midi_range
+from midi_rule_engine import CLEAN_37KEY_MIDI_NAME
 from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
 from tools import (
     CancellationToken,
@@ -24,11 +40,28 @@ from tools import (
 )
 
 
+MIDI_SOURCE_PRIORITY = (
+    "Edited MIDI",
+    "Final 37-Key MIDI",
+    "Pitch Corrected MIDI",
+    "AI Optimized MIDI",
+    "Clean 37-Key MIDI",
+    "Raw MIDI",
+)
+MIDI_SOURCE_FILENAMES = {
+    "Edited MIDI": EDITED_37KEY_MIDI_NAME,
+    "Final 37-Key MIDI": FINAL_37KEY_MIDI_NAME,
+    "Pitch Corrected MIDI": PITCH_CORRECTED_MIDI_NAME,
+    "AI Optimized MIDI": AI_OPTIMIZED_MIDI_NAME,
+    "Clean 37-Key MIDI": CLEAN_37KEY_MIDI_NAME,
+}
+
+
 class YoutubeMidiApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube MIDI Keyboard")
-        self.root.geometry("760x560")
+        self.root.geometry("820x620")
         self.root.minsize(660, 480)
         self.root.attributes("-topmost", True)
 
@@ -43,7 +76,8 @@ class YoutubeMidiApp:
         self.url_var = tk.StringVar()
         self.always_top_var = tk.BooleanVar(value=True)
         self.midi_choice_var = tk.StringVar(value="accompaniment_midi")
-        self.midi_source_var = tk.StringVar(value="final")
+        self.midi_source_var = tk.StringVar()
+        self.available_midi_sources = {}
         self.convert_vocals_midi_var = tk.BooleanVar(value=False)
         self.selected_midi_var = tk.StringVar()
         self.cached_choice_var = tk.StringVar()
@@ -62,18 +96,50 @@ class YoutubeMidiApp:
         self.melody_max_notes_var = tk.IntVar(value=1)
         self.melody_window_var = tk.IntVar(value=80)
         self.optimizer_mode_var = tk.StringVar(value="Rule")
+        self.range_start_var = tk.DoubleVar(value=0.0)
+        self.range_end_var = tk.DoubleVar(value=30.0)
         self.status_var = tk.StringVar(value="Ready")
+        self.studio_position_var = tk.DoubleVar(value=0.0)
+        self.studio_current_time_var = tk.StringVar(value="00:00.000")
+        self.studio_total_time_var = tk.StringVar(value="00:00.000")
+        self.studio_status_var = tk.StringVar(value="No MIDI loaded")
+        self.studio_loaded_path = None
+        self.studio_events = []
+        self.studio_event_times = []
+        self.studio_event_index = 0
+        self.studio_total_duration = 0.0
+        self.studio_position = 0.0
+        self.studio_started_at = 0.0
+        self.studio_state = "stopped"
+        self.studio_output = None
+        self.studio_after_id = None
+        self.studio_updating_slider = False
+        self.editor_source_path = None
+        self.editor_notes = []
+        self.editor_suspicious_reasons = {}
 
         self.build_ui()
         self.refresh_converted_outputs()
         self.root.bind("<F8>", self.stop_keyboard_playback)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.poll_queue()
 
     def build_ui(self):
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(6, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-        top = ttk.Frame(self.root, padding=12)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.main_tab = ttk.Frame(self.notebook)
+        self.studio_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.main_tab, text="Converter")
+        self.notebook.add(self.studio_tab, text="MIDI Studio")
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
+
+        self.main_tab.columnconfigure(0, weight=1)
+        self.main_tab.rowconfigure(6, weight=1)
+
+        top = ttk.Frame(self.main_tab, padding=12)
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(1, weight=1)
 
@@ -89,7 +155,7 @@ class YoutubeMidiApp:
         )
         self.local_audio_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
 
-        options = ttk.Frame(self.root, padding=(12, 0, 12, 8))
+        options = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
         options.grid(row=1, column=0, sticky="ew")
         options.columnconfigure(4, weight=1)
 
@@ -135,7 +201,7 @@ class YoutubeMidiApp:
             variable=self.convert_vocals_midi_var,
         ).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
-        timing = ttk.Frame(self.root, padding=(12, 0, 12, 8))
+        timing = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
         timing.grid(row=2, column=0, sticky="ew")
         timing.columnconfigure(6, weight=1)
 
@@ -169,7 +235,7 @@ class YoutubeMidiApp:
             width=6,
         ).grid(row=0, column=5, sticky="w", padx=(4, 0))
 
-        cleanup = ttk.Frame(self.root, padding=(12, 0, 12, 8))
+        cleanup = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
         cleanup.grid(row=3, column=0, sticky="ew")
         cleanup.columnconfigure(7, weight=1)
 
@@ -242,7 +308,7 @@ class YoutubeMidiApp:
             width=6,
         ).grid(row=1, column=5, sticky="w", padx=(4, 18), pady=(8, 0))
 
-        midi_panel = ttk.Frame(self.root, padding=(12, 0, 12, 8))
+        midi_panel = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
         midi_panel.grid(row=4, column=0, sticky="ew")
         midi_panel.columnconfigure(5, weight=1)
 
@@ -291,27 +357,18 @@ class YoutubeMidiApp:
             row=1, column=5, sticky="w", padx=(8, 0), pady=(8, 0)
         )
         ttk.Label(midi_panel, text="MIDI source").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Radiobutton(
+        self.midi_source_combo = ttk.Combobox(
             midi_panel,
-            text="Final 37-Key MIDI",
-            value="final",
-            variable=self.midi_source_var,
-            command=self.update_selected_midi,
-        ).grid(row=2, column=1, sticky="w", pady=(8, 0))
-        ttk.Radiobutton(
-            midi_panel,
-            text="Clean 37-Key MIDI",
-            value="clean",
-            variable=self.midi_source_var,
-            command=self.update_selected_midi,
-        ).grid(row=2, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
-        ttk.Radiobutton(
-            midi_panel,
-            text="Raw MIDI",
-            value="raw",
-            variable=self.midi_source_var,
-            command=self.update_selected_midi,
-        ).grid(row=2, column=3, sticky="w", padx=(12, 0), pady=(8, 0))
+            textvariable=self.midi_source_var,
+            state="readonly",
+            width=24,
+        )
+        self.midi_source_combo.grid(
+            row=2, column=1, columnspan=3, sticky="w", padx=(8, 0), pady=(8, 0)
+        )
+        self.midi_source_combo.bind(
+            "<<ComboboxSelected>>", self.on_midi_source_selected
+        )
         ttk.Label(midi_panel, text="Optimizer").grid(row=2, column=4, sticky="e", pady=(8, 0))
         ttk.Combobox(
             midi_panel,
@@ -324,15 +381,44 @@ class YoutubeMidiApp:
             row=2, column=6, sticky="w", padx=(8, 0), pady=(8, 0)
         )
 
+        ttk.Label(midi_panel, text="Start seconds").grid(
+            row=3, column=0, sticky="w", pady=(8, 0)
+        )
+        ttk.Spinbox(
+            midi_panel,
+            from_=0,
+            to=86400,
+            increment=1,
+            textvariable=self.range_start_var,
+            width=8,
+        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Label(midi_panel, text="End seconds").grid(
+            row=3, column=2, sticky="e", padx=(12, 0), pady=(8, 0)
+        )
+        ttk.Spinbox(
+            midi_panel,
+            from_=0.1,
+            to=86400,
+            increment=1,
+            textvariable=self.range_end_var,
+            width=8,
+        ).grid(row=3, column=3, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Button(midi_panel, text="Play Range", command=self.start_range_playback).grid(
+            row=3, column=4, sticky="e", padx=(8, 0), pady=(8, 0)
+        )
+        ttk.Button(midi_panel, text="Export Range", command=self.export_selected_range).grid(
+            row=3, column=5, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        )
+
         selected = ttk.Label(
-            self.root,
+            self.main_tab,
             textvariable=self.selected_midi_var,
             padding=(12, 0, 12, 8),
             foreground="#444",
         )
         selected.grid(row=5, column=0, sticky="new")
 
-        log_frame = ttk.Frame(self.root, padding=(12, 0, 12, 8))
+        log_frame = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
         log_frame.grid(row=6, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -343,11 +429,473 @@ class YoutubeMidiApp:
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log.configure(yscrollcommand=scrollbar.set)
 
-        status = ttk.Label(self.root, textvariable=self.status_var, padding=(12, 0, 12, 12))
+        status = ttk.Label(
+            self.main_tab, textvariable=self.status_var, padding=(12, 0, 12, 12)
+        )
         status.grid(row=7, column=0, sticky="ew")
+
+        self.build_midi_studio_ui()
+
+    def build_midi_studio_ui(self):
+        self.studio_tab.columnconfigure(0, weight=1)
+        self.studio_tab.rowconfigure(3, weight=1)
+
+        source = ttk.Frame(self.studio_tab, padding=(12, 12, 12, 8))
+        source.grid(row=0, column=0, sticky="ew")
+        source.columnconfigure(1, weight=1)
+        ttk.Label(source, text="Selected MIDI").grid(row=0, column=0, sticky="w")
+        ttk.Label(source, textvariable=self.selected_midi_var, foreground="#444").grid(
+            row=0, column=1, sticky="ew", padx=(8, 0)
+        )
+
+        controls = ttk.Frame(self.studio_tab, padding=(12, 0, 12, 8))
+        controls.grid(row=1, column=0, sticky="ew")
+        controls.columnconfigure(6, weight=1)
+        self.studio_play_button = ttk.Button(
+            controls, text="Play", command=self.play_studio_midi
+        )
+        self.studio_play_button.grid(row=0, column=0, sticky="w")
+        self.studio_pause_button = ttk.Button(
+            controls, text="Pause", command=self.pause_studio_midi, state="disabled"
+        )
+        self.studio_pause_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.studio_stop_button = ttk.Button(
+            controls, text="Stop", command=self.stop_studio_midi, state="disabled"
+        )
+        self.studio_stop_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(controls, textvariable=self.studio_current_time_var).grid(
+            row=0, column=3, sticky="e", padx=(20, 4)
+        )
+        ttk.Label(controls, text="/").grid(row=0, column=4)
+        ttk.Label(controls, textvariable=self.studio_total_time_var).grid(
+            row=0, column=5, sticky="w", padx=(4, 0)
+        )
+        ttk.Label(controls, textvariable=self.studio_status_var).grid(
+            row=0, column=6, sticky="e", padx=(16, 0)
+        )
+
+        self.studio_seek = ttk.Scale(
+            self.studio_tab,
+            from_=0,
+            to=1,
+            variable=self.studio_position_var,
+            command=self.on_studio_seek,
+        )
+        self.studio_seek.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        editor = ttk.Frame(self.studio_tab, padding=(12, 0, 12, 8))
+        editor.grid(row=3, column=0, sticky="nsew")
+        editor.columnconfigure(0, weight=1)
+        editor.rowconfigure(1, weight=1)
+
+        editor_actions = ttk.Frame(editor)
+        editor_actions.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        ttk.Button(
+            editor_actions,
+            text="Open Selected MIDI",
+            command=self.open_selected_midi_in_editor,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            editor_actions,
+            text="Delete selected notes",
+            command=self.delete_selected_editor_notes,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Button(
+            editor_actions,
+            text="Delete same pitch",
+            command=self.delete_same_pitch_editor_notes,
+        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ttk.Button(
+            editor_actions,
+            text="Delete suspicious notes",
+            command=self.delete_suspicious_editor_notes,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(
+            editor_actions,
+            text="Save as edited_37key.mid",
+            command=self.save_editor_midi,
+        ).grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        columns = (
+            "start_ms",
+            "duration_ms",
+            "note",
+            "note_name",
+            "velocity",
+            "suspicious_reason",
+        )
+        self.editor_tree = ttk.Treeview(
+            editor,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+        )
+        headings = {
+            "start_ms": "start_ms",
+            "duration_ms": "duration_ms",
+            "note": "note",
+            "note_name": "note_name",
+            "velocity": "velocity",
+            "suspicious_reason": "suspicious_reason",
+        }
+        widths = {
+            "start_ms": 90,
+            "duration_ms": 95,
+            "note": 55,
+            "note_name": 75,
+            "velocity": 65,
+            "suspicious_reason": 260,
+        }
+        for column in columns:
+            self.editor_tree.heading(column, text=headings[column])
+            self.editor_tree.column(
+                column,
+                width=widths[column],
+                minwidth=45,
+                stretch=column == "suspicious_reason",
+                anchor="w" if column == "suspicious_reason" else "center",
+            )
+        self.editor_tree.tag_configure("suspicious", foreground="#b42318")
+        self.editor_tree.grid(row=1, column=0, sticky="nsew")
+        editor_scrollbar = ttk.Scrollbar(
+            editor, orient="vertical", command=self.editor_tree.yview
+        )
+        editor_scrollbar.grid(row=1, column=1, sticky="ns")
+        self.editor_tree.configure(yscrollcommand=editor_scrollbar.set)
+
+        self.studio_canvas = tk.Canvas(
+            self.studio_tab,
+            background="#202225",
+            highlightthickness=0,
+            height=80,
+        )
+        self.studio_canvas.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
+
+    def open_selected_midi_in_editor(self):
+        midi_path = self.get_selected_midi()
+        if not midi_path:
+            return
+        try:
+            self.editor_notes = load_editor_notes(midi_path)
+        except Exception as exc:
+            messagebox.showerror("MIDI Editor", f"Could not read MIDI:\n{exc}")
+            return
+
+        self.editor_source_path = midi_path
+        self.refresh_editor_tree()
+        self.studio_status_var.set(f"Editor: {len(self.editor_notes)} notes")
+
+    def refresh_editor_tree(self):
+        self.editor_suspicious_reasons = find_suspicious_notes(self.editor_notes)
+        children = self.editor_tree.get_children()
+        if children:
+            self.editor_tree.delete(*children)
+        for index, note in enumerate(self.editor_notes):
+            reason = self.editor_suspicious_reasons.get(index, "")
+            tags = ("suspicious",) if reason else ()
+            self.editor_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    int(round(note.start * 1000)),
+                    int(round(note.duration_ms)),
+                    note.note,
+                    midi_note_name(note.note),
+                    note.velocity,
+                    reason,
+                ),
+                tags=tags,
+            )
+
+    def selected_editor_indices(self):
+        return {int(item_id) for item_id in self.editor_tree.selection()}
+
+    def delete_selected_editor_notes(self):
+        selected = self.selected_editor_indices()
+        if not selected:
+            messagebox.showwarning("MIDI Editor", "Select one or more notes first.")
+            return
+        self.editor_notes = [
+            note for index, note in enumerate(self.editor_notes) if index not in selected
+        ]
+        self.refresh_editor_tree()
+
+    def delete_same_pitch_editor_notes(self):
+        selected = self.selected_editor_indices()
+        if not selected:
+            messagebox.showwarning("MIDI Editor", "Select a pitch first.")
+            return
+        pitches = {self.editor_notes[index].note for index in selected}
+        self.editor_notes = [
+            note for note in self.editor_notes if note.note not in pitches
+        ]
+        self.refresh_editor_tree()
+
+    def delete_suspicious_editor_notes(self):
+        suspicious = set(find_suspicious_notes(self.editor_notes))
+        if not suspicious:
+            messagebox.showinfo("MIDI Editor", "No suspicious notes were found.")
+            return
+        self.editor_notes = [
+            note
+            for index, note in enumerate(self.editor_notes)
+            if index not in suspicious
+        ]
+        self.refresh_editor_tree()
+
+    def save_editor_midi(self):
+        if self.editor_source_path is None:
+            messagebox.showwarning("MIDI Editor", "Open the selected MIDI first.")
+            return
+
+        output_path = self.editor_source_path.parent / EDITED_37KEY_MIDI_NAME
+        if output_path.resolve() == self.editor_source_path.resolve():
+            messagebox.showerror(
+                "MIDI Editor",
+                "The selected MIDI is already edited_37key.mid. Open its original source "
+                "before saving so it is not overwritten.",
+            )
+            return
+        try:
+            save_edited_midi(self.editor_notes, output_path)
+        except Exception as exc:
+            messagebox.showerror("MIDI Editor", f"Could not save MIDI:\n{exc}")
+            return
+
+        self.stop_studio_midi()
+        self.studio_loaded_path = None
+        if self.results:
+            self.update_selected_midi()
+        else:
+            self.configure_midi_sources_from_path(output_path)
+        self.studio_status_var.set("Edited MIDI saved")
+        self.log_message(f"Edited 37-Key MIDI: {output_path}")
 
     def apply_topmost(self):
         self.root.attributes("-topmost", self.always_top_var.get())
+
+    @staticmethod
+    def format_studio_time(seconds):
+        milliseconds = max(0, int(round(float(seconds) * 1000)))
+        minutes, remainder = divmod(milliseconds, 60000)
+        whole_seconds, milliseconds = divmod(remainder, 1000)
+        return f"{minutes:02d}:{whole_seconds:02d}.{milliseconds:03d}"
+
+    def on_notebook_tab_changed(self, event=None):
+        if self.notebook.select() == str(self.studio_tab):
+            self.load_studio_midi()
+
+    def load_studio_midi(self, force=False):
+        value = self.selected_midi_var.get().strip()
+        if not value:
+            self.studio_status_var.set("No MIDI selected")
+            return False
+
+        midi_path = Path(value)
+        if not midi_path.exists():
+            self.studio_status_var.set("MIDI not found")
+            return False
+        if not force and midi_path == self.studio_loaded_path:
+            return True
+
+        self.stop_studio_midi()
+        try:
+            midi = mido.MidiFile(midi_path)
+            absolute_time = 0.0
+            events = []
+            for message in midi:
+                absolute_time += float(message.time)
+                if not message.is_meta:
+                    events.append((absolute_time, message.copy(time=0)))
+        except Exception as exc:
+            self.studio_status_var.set("Load failed")
+            messagebox.showerror("MIDI Studio", f"Could not load MIDI:\n{exc}")
+            return False
+
+        self.studio_loaded_path = midi_path
+        self.studio_events = events
+        self.studio_event_times = [timestamp for timestamp, _ in events]
+        self.studio_total_duration = max(float(midi.length), absolute_time, 0.0)
+        self.studio_event_index = 0
+        self.studio_position = 0.0
+        self.studio_seek.configure(to=max(self.studio_total_duration, 0.001))
+        self.update_studio_position(0.0)
+        self.studio_total_time_var.set(
+            self.format_studio_time(self.studio_total_duration)
+        )
+        self.studio_status_var.set("Ready")
+        return True
+
+    def update_studio_position(self, position):
+        self.studio_position = max(
+            0.0, min(float(position), self.studio_total_duration)
+        )
+        self.studio_updating_slider = True
+        self.studio_position_var.set(self.studio_position)
+        self.studio_updating_slider = False
+        self.studio_current_time_var.set(
+            self.format_studio_time(self.studio_position)
+        )
+
+    def on_studio_seek(self, value):
+        if self.studio_updating_slider or self.studio_loaded_path is None:
+            return
+
+        position = max(0.0, min(float(value), self.studio_total_duration))
+        if self.studio_state in ("playing", "paused"):
+            self.send_studio_all_notes_off()
+        self.studio_event_index = bisect.bisect_left(
+            self.studio_event_times, position
+        )
+        self.update_studio_position(position)
+        if self.studio_state == "playing":
+            self.studio_started_at = time.perf_counter() - position
+
+    def open_studio_output(self):
+        if self.studio_output is not None:
+            return True
+        try:
+            self.studio_output = mido.open_output()
+        except Exception as exc:
+            self.studio_status_var.set("No MIDI output")
+            messagebox.showerror(
+                "MIDI Studio",
+                "Could not open a MIDI output port. Install the project requirements "
+                f"and make sure a MIDI synthesizer is available.\n\n{exc}",
+            )
+            return False
+        return True
+
+    def play_studio_midi(self):
+        if not self.load_studio_midi():
+            return
+        if not self.studio_events or self.studio_total_duration <= 0:
+            messagebox.showwarning("MIDI Studio", "This MIDI has no playable events.")
+            return
+        if not self.open_studio_output():
+            return
+
+        if self.studio_position >= self.studio_total_duration:
+            self.studio_event_index = 0
+            self.update_studio_position(0.0)
+
+        self.studio_state = "playing"
+        self.studio_started_at = time.perf_counter() - self.studio_position
+        self.studio_play_button.configure(state="disabled")
+        self.studio_pause_button.configure(state="normal")
+        self.studio_stop_button.configure(state="normal")
+        self.studio_status_var.set("Playing")
+        self.studio_tick()
+
+    def pause_studio_midi(self):
+        if self.studio_state != "playing":
+            return
+
+        position = min(
+            self.studio_total_duration,
+            time.perf_counter() - self.studio_started_at,
+        )
+        self.update_studio_position(position)
+        self.studio_state = "paused"
+        self.cancel_studio_tick()
+        self.send_studio_all_notes_off()
+        self.studio_play_button.configure(state="normal")
+        self.studio_pause_button.configure(state="disabled")
+        self.studio_stop_button.configure(state="normal")
+        self.studio_status_var.set("Paused")
+
+    def stop_studio_midi(self):
+        self.cancel_studio_tick()
+        self.send_studio_all_notes_off()
+        if self.studio_output is not None:
+            try:
+                self.studio_output.close()
+            except Exception:
+                pass
+            self.studio_output = None
+
+        self.studio_state = "stopped"
+        self.studio_event_index = 0
+        self.update_studio_position(0.0)
+        if hasattr(self, "studio_play_button"):
+            self.studio_play_button.configure(state="normal")
+            self.studio_pause_button.configure(state="disabled")
+            self.studio_stop_button.configure(state="disabled")
+        if self.studio_loaded_path is not None:
+            self.studio_status_var.set("Stopped")
+
+    def send_studio_all_notes_off(self):
+        if self.studio_output is None:
+            return
+        try:
+            for channel in range(16):
+                self.studio_output.send(
+                    mido.Message("control_change", channel=channel, control=123, value=0)
+                )
+        except Exception:
+            pass
+
+    def cancel_studio_tick(self):
+        if self.studio_after_id is not None:
+            self.root.after_cancel(self.studio_after_id)
+            self.studio_after_id = None
+
+    def schedule_studio_tick(self):
+        self.cancel_studio_tick()
+        self.studio_after_id = self.root.after(50, self.studio_tick)
+
+    def studio_tick(self):
+        self.studio_after_id = None
+        if self.studio_state != "playing":
+            return
+
+        position = min(
+            self.studio_total_duration,
+            time.perf_counter() - self.studio_started_at,
+        )
+        try:
+            while (
+                self.studio_event_index < len(self.studio_events)
+                and self.studio_events[self.studio_event_index][0] <= position
+            ):
+                _, message = self.studio_events[self.studio_event_index]
+                self.studio_output.send(message)
+                self.studio_event_index += 1
+        except Exception as exc:
+            self.stop_studio_midi()
+            self.studio_status_var.set("Playback failed")
+            messagebox.showerror("MIDI Studio", f"MIDI playback failed:\n{exc}")
+            return
+
+        self.update_studio_position(position)
+        if position >= self.studio_total_duration:
+            self.finish_studio_playback()
+        else:
+            self.schedule_studio_tick()
+
+    def finish_studio_playback(self):
+        self.cancel_studio_tick()
+        self.send_studio_all_notes_off()
+        if self.studio_output is not None:
+            try:
+                self.studio_output.close()
+            except Exception:
+                pass
+            self.studio_output = None
+        self.studio_state = "stopped"
+        self.studio_event_index = len(self.studio_events)
+        self.update_studio_position(self.studio_total_duration)
+        self.studio_play_button.configure(state="normal")
+        self.studio_pause_button.configure(state="disabled")
+        self.studio_stop_button.configure(state="disabled")
+        self.studio_status_var.set("Finished")
+
+    def on_close(self):
+        self.stop_event.set()
+        self.unregister_stop_hotkey()
+        self.stop_studio_midi()
+        self.root.destroy()
 
     def log_message(self, message):
         self.log.configure(state="normal")
@@ -410,7 +958,10 @@ class YoutubeMidiApp:
                 self.status_var.set("Keyboard playback failed")
                 messagebox.showerror("Keyboard playback failed", payload)
             elif kind == "optimize_done":
-                self.selected_midi_var.set(str(payload["final_midi"]))
+                if self.results:
+                    self.update_selected_midi()
+                else:
+                    self.configure_midi_sources_from_path(payload["final_midi"])
                 self.status_var.set("MIDI optimized")
                 self.log_message(f"AI optimized MIDI: {payload['ai_optimized_midi']}")
                 self.log_message(f"Pitch corrected MIDI: {payload['pitch_corrected_midi']}")
@@ -432,7 +983,7 @@ class YoutubeMidiApp:
         self.local_audio_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.results = None
-        self.selected_midi_var.set("")
+        self.clear_midi_source_options()
         self.converting = True
         self.convert_cancel_token = CancellationToken()
         self.status_var.set("Checking dependencies")
@@ -456,7 +1007,7 @@ class YoutubeMidiApp:
         self.local_audio_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.results = None
-        self.selected_midi_var.set("")
+        self.clear_midi_source_options()
         self.converting = True
         self.convert_cancel_token = CancellationToken()
         self.status_var.set("Checking dependencies")
@@ -593,41 +1144,83 @@ class YoutubeMidiApp:
         except Exception as exc:
             self.queue.put(("convert_error", format_command_error(exc)))
 
-    def update_selected_midi(self):
-        if not self.results:
+    def clear_midi_source_options(self):
+        self.available_midi_sources = {}
+        self.midi_source_combo.configure(values=())
+        self.midi_source_var.set("")
+        self.selected_midi_var.set("")
+
+    def set_midi_source_options(self, sources):
+        available = {}
+        for label in MIDI_SOURCE_PRIORITY:
+            value = sources.get(label)
+            if not value:
+                continue
+            path = Path(value)
+            if path.exists():
+                available[label] = path
+
+        self.available_midi_sources = available
+        labels = tuple(available)
+        self.midi_source_combo.configure(values=labels)
+        if not labels:
+            self.midi_source_var.set("")
+            self.selected_midi_var.set("")
             return
 
-        raw_key = self.midi_choice_var.get()
-        clean_key = {
-            "vocal_midi": "vocal_clean_midi",
-            "accompaniment_midi": "accompaniment_clean_midi",
-        }.get(raw_key)
-        final_key = {
-            "vocal_midi": "vocal_final_midi",
-            "accompaniment_midi": "accompaniment_final_midi",
-        }.get(raw_key)
+        self.midi_source_var.set(labels[0])
+        self.on_midi_source_selected()
 
-        midi_file = None
-        if self.midi_source_var.get() == "final" and final_key:
-            midi_file = self.results.get(final_key)
-        if not midi_file and self.midi_source_var.get() in ("final", "clean") and clean_key:
-            midi_file = self.results.get(clean_key)
-        if not midi_file:
-            midi_file = self.results.get(raw_key)
-        if not midi_file and raw_key == "vocal_midi":
+    def collect_result_midi_sources(self):
+        if not self.results:
+            return {}
+
+        raw_key = self.midi_choice_var.get()
+        if not self.results.get(raw_key) and raw_key == "vocal_midi":
             self.midi_choice_var.set("accompaniment_midi")
             raw_key = "accompaniment_midi"
-            clean_key = "accompaniment_clean_midi"
-            final_key = "accompaniment_final_midi"
-            if self.midi_source_var.get() == "final":
-                midi_file = self.results.get(final_key)
-            if not midi_file and self.midi_source_var.get() in ("final", "clean"):
-                midi_file = self.results.get(clean_key)
-            if not midi_file:
-                midi_file = self.results.get(raw_key)
+        prefix = "vocal" if raw_key == "vocal_midi" else "accompaniment"
+        sources = {
+            "Final 37-Key MIDI": self.results.get(f"{prefix}_final_midi"),
+            "Pitch Corrected MIDI": self.results.get(
+                f"{prefix}_pitch_corrected_midi"
+            ),
+            "AI Optimized MIDI": self.results.get(f"{prefix}_ai_optimized_midi"),
+            "Clean 37-Key MIDI": self.results.get(f"{prefix}_clean_midi"),
+            "Raw MIDI": self.results.get(raw_key),
+        }
+        parent_source = next((value for value in sources.values() if value), None)
+        if parent_source:
+            sources["Edited MIDI"] = Path(parent_source).parent / EDITED_37KEY_MIDI_NAME
+        return sources
 
-        if midi_file:
-            self.selected_midi_var.set(str(midi_file))
+    def configure_midi_sources_from_path(self, midi_path):
+        midi_path = Path(midi_path)
+        sources = {
+            label: midi_path.parent / filename
+            for label, filename in MIDI_SOURCE_FILENAMES.items()
+        }
+        known_label = next(
+            (
+                label
+                for label, filename in MIDI_SOURCE_FILENAMES.items()
+                if midi_path.name.lower() == filename.lower()
+            ),
+            None,
+        )
+        if known_label:
+            sources[known_label] = midi_path
+        else:
+            sources["Raw MIDI"] = midi_path
+        self.set_midi_source_options(sources)
+
+    def on_midi_source_selected(self, event=None):
+        midi_path = self.available_midi_sources.get(self.midi_source_var.get())
+        if midi_path:
+            self.selected_midi_var.set(str(midi_path))
+
+    def update_selected_midi(self):
+        self.set_midi_source_options(self.collect_result_midi_sources())
 
     def open_midi(self):
         filename = filedialog.askopenfilename(
@@ -635,8 +1228,8 @@ class YoutubeMidiApp:
             filetypes=[("MIDI files", "*.mid *.midi"), ("All files", "*.*")],
         )
         if filename:
-            self.selected_midi_var.set(filename)
             self.results = None
+            self.configure_midi_sources_from_path(filename)
 
     def open_converted(self):
         output_root = Path("output")
@@ -847,6 +1440,48 @@ class YoutubeMidiApp:
             self.queue.put(("optimize_error", str(exc)))
 
     def start_keyboard_playback(self):
+        self.start_playback()
+
+    def get_range_settings(self):
+        try:
+            start_sec = float(self.range_start_var.get())
+            end_sec = float(self.range_end_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            messagebox.showerror("Invalid range", "Start and end seconds must be numbers.")
+            return None
+
+        if start_sec < 0 or end_sec <= start_sec:
+            messagebox.showerror(
+                "Invalid range",
+                "Start seconds must be 0 or greater, and end must be after start.",
+            )
+            return None
+        return start_sec, end_sec
+
+    def start_range_playback(self):
+        midi_range = self.get_range_settings()
+        if midi_range is not None:
+            self.start_playback(start_sec=midi_range[0], end_sec=midi_range[1])
+
+    def export_selected_range(self):
+        midi_path = self.get_selected_midi()
+        if not midi_path:
+            return
+        midi_range = self.get_range_settings()
+        if midi_range is None:
+            return
+
+        output_path = midi_path.parent / CHORUS_MIDI_NAME
+        try:
+            export_midi_range(midi_path, output_path, *midi_range)
+        except Exception as exc:
+            messagebox.showerror("Range export failed", str(exc))
+            return
+
+        self.status_var.set("MIDI range exported")
+        self.log_message(f"Exported MIDI range: {output_path}")
+
+    def start_playback(self, start_sec=None, end_sec=None):
         midi_path = self.get_selected_midi()
         if not midi_path or self.playing:
             return
@@ -874,17 +1509,40 @@ class YoutubeMidiApp:
         self.play_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status_var.set(f"Hiding window. Focus the game within {countdown} seconds.")
-        self.log_message(f"Keyboard playback will start in {countdown} seconds. Press F8 to stop.")
+        if start_sec is None:
+            playback_label = "Keyboard playback"
+        else:
+            playback_label = f"Range playback ({start_sec:g}s to {end_sec:g}s)"
+        self.log_message(f"{playback_label} will start in {countdown} seconds. Press F8 to stop.")
         self.root.withdraw()
 
         thread = threading.Thread(
             target=self.play_worker,
-            args=(midi_path, speed, countdown, chord_delay, min_hold, cleanup_settings),
+            args=(
+                midi_path,
+                speed,
+                countdown,
+                chord_delay,
+                min_hold,
+                cleanup_settings,
+                start_sec,
+                end_sec,
+            ),
             daemon=True,
         )
         thread.start()
 
-    def play_worker(self, midi_path, speed, countdown, chord_delay, min_hold, cleanup_settings):
+    def play_worker(
+        self,
+        midi_path,
+        speed,
+        countdown,
+        chord_delay,
+        min_hold,
+        cleanup_settings,
+        start_sec=None,
+        end_sec=None,
+    ):
         try:
             if self.stop_event.wait(countdown):
                 self.queue.put(("play_done", None))
@@ -895,6 +1553,8 @@ class YoutubeMidiApp:
                 stop_event=self.stop_event,
                 chord_delay=chord_delay,
                 min_hold=min_hold,
+                start_sec=start_sec,
+                end_sec=end_sec,
                 **cleanup_settings,
             )
             self.queue.put(("play_done", None))

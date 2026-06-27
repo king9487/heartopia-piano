@@ -562,6 +562,8 @@ def build_keyboard_schedule(
     melody_window=0.08,
     melody_max_notes=1,
     out_of_range_mode=None,
+    start_sec=None,
+    end_sec=None,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -569,6 +571,12 @@ def build_keyboard_schedule(
         raise ValueError("chord_delay must be greater than or equal to 0")
     if min_hold < 0:
         raise ValueError("min_hold must be greater than or equal to 0")
+    range_start = 0.0 if start_sec is None else float(start_sec)
+    range_end = None if end_sec is None else float(end_sec)
+    if range_start < 0:
+        raise ValueError("start_sec must be greater than or equal to 0")
+    if range_end is not None and range_end <= range_start:
+        raise ValueError("end_sec must be greater than start_sec")
 
     schedule = []
     chord_counts = {}
@@ -589,10 +597,15 @@ def build_keyboard_schedule(
     )
 
     for event in note_events:
-        start_time = event.start / speed
-        end_time = event.end / speed
-        chord_index = chord_counts.get(event.start, 0)
-        chord_counts[event.start] = chord_index + 1
+        if event.end <= range_start or (range_end is not None and event.start >= range_end):
+            continue
+
+        clipped_start = max(event.start, range_start)
+        clipped_end = min(event.end, range_end) if range_end is not None else event.end
+        start_time = (clipped_start - range_start) / speed
+        end_time = (clipped_end - range_start) / speed
+        chord_index = chord_counts.get(clipped_start, 0)
+        chord_counts[clipped_start] = chord_index + 1
         press_time = start_time + (chord_index * chord_delay)
         release_time = max(end_time, press_time + min_hold)
         schedule.append((press_time, "down", event.note, event.key))
@@ -620,6 +633,8 @@ def play_midi_as_keyboard(
     melody_window=0.08,
     melody_max_notes=1,
     out_of_range_mode=None,
+    start_sec=None,
+    end_sec=None,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -643,6 +658,8 @@ def play_midi_as_keyboard(
         melody_window=melody_window,
         melody_max_notes=melody_max_notes,
         out_of_range_mode=out_of_range_mode,
+        start_sec=start_sec,
+        end_sec=end_sec,
     )
 
     try:
