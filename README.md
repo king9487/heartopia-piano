@@ -66,6 +66,15 @@ CLI 版：
 .\.venv\Scripts\python.exe .\cli_app.py
 ```
 
+CLI 調性移調：
+
+```powershell
+.\.venv\Scripts\python.exe .\cli_app.py --target-key D
+.\.venv\Scripts\python.exe .\cli_app.py --original-key G --target-key C
+```
+
+沒有指定 `--target-key` 時，流程不會做調性移調。指定後會自動偵測原調，將非鼓組音符移調，並另存為 `transposed_37key.mid`。
+
 ## 基本使用
 
 ### YouTube 轉 MIDI

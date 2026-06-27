@@ -1,13 +1,19 @@
+import argparse
 import time
 from pathlib import Path
 
 from converter import audio_file_to_midi, youtube_to_midi
 from midi_to_keyboard import play_midi_as_keyboard, preview_midi_keyboard
 from tools import check_cli_dependencies, default_demucs_device, format_command_error
+from transpose import KEY_NAMES, TRANSPOSED_MIDI_NAME, transpose_midi_to_key
 
 
 def choose_midi_file(results):
     choices = []
+    if results.get("accompaniment_transposed_midi"):
+        choices.append(
+            ("accompaniment transposed", results["accompaniment_transposed_midi"])
+        )
     choices.append(
         (
             "accompaniment final 37-key",
@@ -56,7 +62,55 @@ def ask_yes_no(prompt, default=False):
     return answer in ("y", "yes")
 
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Convert audio to 37-key game MIDI")
+    parser.add_argument(
+        "--target-key",
+        choices=KEY_NAMES,
+        help="Transpose the accompaniment MIDI to this major key.",
+    )
+    parser.add_argument(
+        "--original-key",
+        choices=KEY_NAMES,
+        help="Override automatic detection of the original major key.",
+    )
+    return parser.parse_args(argv)
+
+
+def apply_cli_key_transpose(results, original_key, target_key):
+    if not target_key:
+        return None
+
+    source_midi = (
+        results.get("accompaniment_final_midi")
+        or results.get("accompaniment_pitch_corrected_midi")
+        or results.get("accompaniment_ai_optimized_midi")
+        or results.get("accompaniment_clean_midi")
+        or results["accompaniment_midi"]
+    )
+    output_midi = Path(source_midi).parent / TRANSPOSED_MIDI_NAME
+    result = transpose_midi_to_key(
+        source_midi,
+        output_midi,
+        original_key=original_key,
+        target_key=target_key,
+    )
+    displayed_key = result["original_key"]
+    if result["output_midi"] is None:
+        print("Detected Key: Unknown")
+        print("Key detection failed; continuing without transpose.")
+        return result
+
+    results["accompaniment_transposed_midi"] = result["output_midi"]
+    print(f"Detected Key: {displayed_key} Major")
+    print(f"Target Key: {result['target_key']} Major")
+    print(f"Transpose: {result['semitones']:+d} semitones")
+    print("Transposed MIDI:", result["output_midi"])
+    return result
+
+
+def main(argv=None):
+    args = parse_args(argv)
     source = input("Paste YouTube URL or local audio path: ").strip().strip('"')
     if not source:
         raise ValueError("Source cannot be empty")
@@ -81,6 +135,11 @@ def main():
     except Exception as exc:
         print(format_command_error(exc))
         return
+
+    try:
+        apply_cli_key_transpose(results, args.original_key, args.target_key)
+    except Exception as exc:
+        print(f"Key transpose failed; continuing without transpose: {exc}")
 
     print("\nDone!")
     print("Output folder:", results["base_dir"])
