@@ -38,9 +38,15 @@ from tools import (
     default_demucs_device,
     format_command_error,
 )
+from transpose import (
+    KEY_NAMES,
+    TRANSPOSED_MIDI_NAME,
+    transpose_midi_to_key,
+)
 
 
 MIDI_SOURCE_PRIORITY = (
+    "Transposed MIDI",
     "Edited MIDI",
     "Final 37-Key MIDI",
     "Pitch Corrected MIDI",
@@ -49,6 +55,7 @@ MIDI_SOURCE_PRIORITY = (
     "Raw MIDI",
 )
 MIDI_SOURCE_FILENAMES = {
+    "Transposed MIDI": TRANSPOSED_MIDI_NAME,
     "Edited MIDI": EDITED_37KEY_MIDI_NAME,
     "Final 37-Key MIDI": FINAL_37KEY_MIDI_NAME,
     "Pitch Corrected MIDI": PITCH_CORRECTED_MIDI_NAME,
@@ -96,6 +103,10 @@ class YoutubeMidiApp:
         self.melody_max_notes_var = tk.IntVar(value=1)
         self.melody_window_var = tk.IntVar(value=80)
         self.optimizer_mode_var = tk.StringVar(value="Rule")
+        self.original_key_var = tk.StringVar(value="Auto Detect")
+        self.target_key_var = tk.StringVar(value="Original")
+        self.detected_key_var = tk.StringVar(value="Detected Key: --")
+        self.key_transpose_status_var = tk.StringVar(value="Transpose: 0 semitones")
         self.range_start_var = tk.DoubleVar(value=0.0)
         self.range_end_var = tk.DoubleVar(value=30.0)
         self.status_var = tk.StringVar(value="Ready")
@@ -137,7 +148,7 @@ class YoutubeMidiApp:
         self.notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
 
         self.main_tab.columnconfigure(0, weight=1)
-        self.main_tab.rowconfigure(6, weight=1)
+        self.main_tab.rowconfigure(7, weight=1)
 
         top = ttk.Frame(self.main_tab, padding=12)
         top.grid(row=0, column=0, sticky="ew")
@@ -308,8 +319,42 @@ class YoutubeMidiApp:
             width=6,
         ).grid(row=1, column=5, sticky="w", padx=(4, 18), pady=(8, 0))
 
+        key_transpose = ttk.LabelFrame(
+            self.main_tab, text="Key Transpose", padding=(10, 6, 10, 8)
+        )
+        key_transpose.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        ttk.Label(key_transpose, text="Original Key").grid(row=0, column=0, sticky="w")
+        original_key_combo = ttk.Combobox(
+            key_transpose,
+            textvariable=self.original_key_var,
+            values=("Auto Detect", *KEY_NAMES),
+            state="readonly",
+            width=12,
+        )
+        original_key_combo.grid(row=0, column=1, sticky="w", padx=(6, 18))
+        original_key_combo.bind("<<ComboboxSelected>>", self.on_key_transpose_changed)
+
+        ttk.Label(key_transpose, text="Target Key").grid(row=0, column=2, sticky="w")
+        target_key_combo = ttk.Combobox(
+            key_transpose,
+            textvariable=self.target_key_var,
+            values=("Original", *KEY_NAMES),
+            state="readonly",
+            width=12,
+        )
+        target_key_combo.grid(row=0, column=3, sticky="w", padx=(6, 18))
+        target_key_combo.bind("<<ComboboxSelected>>", self.on_key_transpose_changed)
+
+        ttk.Label(key_transpose, textvariable=self.detected_key_var).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+        ttk.Label(key_transpose, textvariable=self.key_transpose_status_var).grid(
+            row=1, column=2, columnspan=2, sticky="w", pady=(8, 0)
+        )
+
         midi_panel = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        midi_panel.grid(row=4, column=0, sticky="ew")
+        midi_panel.grid(row=5, column=0, sticky="ew")
         midi_panel.columnconfigure(5, weight=1)
 
         ttk.Radiobutton(
@@ -416,10 +461,10 @@ class YoutubeMidiApp:
             padding=(12, 0, 12, 8),
             foreground="#444",
         )
-        selected.grid(row=5, column=0, sticky="new")
+        selected.grid(row=6, column=0, sticky="new")
 
         log_frame = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        log_frame.grid(row=6, column=0, sticky="nsew")
+        log_frame.grid(row=7, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
@@ -432,7 +477,7 @@ class YoutubeMidiApp:
         status = ttk.Label(
             self.main_tab, textvariable=self.status_var, padding=(12, 0, 12, 12)
         )
-        status.grid(row=7, column=0, sticky="ew")
+        status.grid(row=8, column=0, sticky="ew")
 
         self.build_midi_studio_ui()
 
@@ -920,6 +965,7 @@ class YoutubeMidiApp:
                 self.converting = False
                 self.convert_cancel_token = None
                 self.update_selected_midi()
+                self.on_key_transpose_changed()
                 self.refresh_converted_outputs()
                 self.convert_button.configure(state="normal")
                 self.local_audio_button.configure(state="normal")
@@ -1192,7 +1238,9 @@ class YoutubeMidiApp:
         }
         parent_source = next((value for value in sources.values() if value), None)
         if parent_source:
-            sources["Edited MIDI"] = Path(parent_source).parent / EDITED_37KEY_MIDI_NAME
+            parent_dir = Path(parent_source).parent
+            sources["Transposed MIDI"] = parent_dir / TRANSPOSED_MIDI_NAME
+            sources["Edited MIDI"] = parent_dir / EDITED_37KEY_MIDI_NAME
         return sources
 
     def configure_midi_sources_from_path(self, midi_path):
@@ -1222,6 +1270,48 @@ class YoutubeMidiApp:
 
     def update_selected_midi(self):
         self.set_midi_source_options(self.collect_result_midi_sources())
+
+    def on_key_transpose_changed(self, event=None):
+        target_key = self.target_key_var.get()
+        if target_key == "Original":
+            self.key_transpose_status_var.set("Transpose: 0 semitones")
+            return
+
+        midi_path = self.get_selected_midi()
+        if not midi_path:
+            return
+
+        if midi_path.name == TRANSPOSED_MIDI_NAME:
+            self.key_transpose_status_var.set("Select a non-transposed MIDI first")
+            return
+
+        original_key = self.original_key_var.get()
+        if original_key == "Auto Detect":
+            original_key = None
+
+        output_path = midi_path.parent / TRANSPOSED_MIDI_NAME
+
+        try:
+            result = transpose_midi_to_key(
+                midi_path,
+                output_path,
+                original_key=original_key,
+                target_key=target_key,
+            )
+        except Exception as exc:
+            messagebox.showerror("Key Transpose failed", str(exc))
+            return
+
+        detected_key = result.get("original_key")
+        semitones = result.get("semitones", 0)
+
+        if detected_key:
+            self.detected_key_var.set(f"Detected Key: {detected_key} Major")
+        else:
+            self.detected_key_var.set("Detected Key: Unknown")
+
+        self.key_transpose_status_var.set(f"Transpose: {semitones:+d} semitones")
+        self.update_selected_midi()
 
     def open_midi(self):
         filename = filedialog.askopenfilename(
