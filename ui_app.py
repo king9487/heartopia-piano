@@ -756,7 +756,7 @@ class YoutubeMidiApp:
         if self.studio_output is not None:
             return True
         try:
-            self.studio_output = mido.open_output()
+            self.studio_output = mido.open_output()  # type: ignore[attr-defined]
         except Exception as exc:
             self.studio_status_var.set("No MIDI output")
             messagebox.showerror(
@@ -860,7 +860,8 @@ class YoutubeMidiApp:
                 and self.studio_events[self.studio_event_index][0] <= position
             ):
                 _, message = self.studio_events[self.studio_event_index]
-                self.studio_output.send(message)
+                if self.studio_output is not None:
+                    self.studio_output.send(message)
                 self.studio_event_index += 1
         except Exception as exc:
             self.stop_studio_midi()
