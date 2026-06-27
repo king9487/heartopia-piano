@@ -19,6 +19,7 @@
   - 可選擇丟掉、智慧保留，或用八度平移處理超出 37 鍵範圍的音
   - 可用 `Melody only` 把複雜伴奏簡化成比較像主旋律的按鍵事件
 - 支援 transpose 升降 key
+- 支援 Key Transpose 調性移調（實驗性功能）
 - 支援 GPU 跑 Demucs
 - 支援快取，已轉過的歌曲不需要重轉
 - 播放時使用一般 OS keyboard events，不包含注入、繞過偵測或 driver-level 模擬
@@ -147,9 +148,14 @@ output\歌曲名稱或檔名
 
 - `Transpose`：升降 key，單位是半音
   - `-1`：降半音
-  - `-2`：降全音
+  - `-2` : 降全音
   - `-12`：降一個八度
   - `+12`：升一個八度
+- `Key Transpose` (實驗性)：
+  - `Original Key`：原始調性。預設為 `Auto Detect`，會嘗試自動偵測 MIDI 的主調。
+  - `Target Key`：目標調性。設定後會自動將音符移調至目標大調。
+  - `Detected Key`：顯示目前偵測到的 MIDI 調性。
+  - **注意**：自動偵測調性對 AI 產生的 MIDI 可能不夠準確。如果移調後聽起來不對，建議手動設定 `Original Key` 或改用 `Transpose` 半音平移。
 - `Chord gap ms`：同一時間多鍵時，每個鍵錯開幾毫秒
 - `Min hold ms`：每個鍵至少按住多久，避免遊戲漏接太短的音
 
