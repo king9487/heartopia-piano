@@ -126,16 +126,27 @@ class YoutubeMidiApp:
         self.studio_state = "stopped"
         self.studio_output = None
         self.studio_after_id = None
+        self.studio_updating_slider = False
+        self.editor_source_path = None
+        self.editor_notes = []
+        self.editor_suspicious_reasons = {}
+
+        # UI widgets that are initialized in build_ui()
+        self.notebook: ttk.Notebook | None = None
+        self.main_tab: ttk.Frame | None = None
+        self.studio_tab: ttk.Frame | None = None
+        self.log: tk.Text | None = None
+        self.convert_button: ttk.Button | None = None
+        self.local_audio_button: ttk.Button | None = None
+        self.stop_button: ttk.Button | None = None
+        self.play_button: ttk.Button | None = None
+        self.midi_source_combo: ttk.Combobox | None = None
+        self.cached_combo: ttk.Combobox | None = None
         self.studio_seek: ttk.Scale | None = None
         self.studio_play_button: ttk.Button | None = None
         self.studio_pause_button: ttk.Button | None = None
         self.studio_stop_button: ttk.Button | None = None
         self.editor_tree: ttk.Treeview | None = None
-        self.studio_updating_slider = False
-        self.editor_source_path = None
-        self.editor_notes = []
-        self.editor_suspicious_reasons = {}
-        self.editor_tree: Optional[ttk.Treeview] = None
 
         self.build_ui()
         self.refresh_converted_outputs()
@@ -147,19 +158,37 @@ class YoutubeMidiApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.grid(row=0, column=0, sticky="nsew")
-        self.main_tab = ttk.Frame(self.notebook)
-        self.studio_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.main_tab, text="Converter")
-        self.notebook.add(self.studio_tab, text="MIDI Studio")
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
+        notebook = ttk.Notebook(self.root)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        main_tab = ttk.Frame(notebook)
+        studio_tab = ttk.Frame(notebook)
+        notebook.add(main_tab, text="Converter")
+        notebook.add(studio_tab, text="MIDI Studio")
+        notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
+        self.notebook = notebook
+        self.main_tab = main_tab
+        self.studio_tab = studio_tab
 
+        assert self.main_tab is not None
         self.main_tab.columnconfigure(0, weight=1)
         self.main_tab.rowconfigure(7, weight=1)
 
         build_converter_tab(self)
         self.build_midi_studio_ui()
+
+        assert self.log is not None
+        assert self.convert_button is not None
+        assert self.local_audio_button is not None
+        assert self.stop_button is not None
+        assert self.play_button is not None
+        assert self.midi_source_combo is not None
+        assert self.cached_combo is not None
+        assert self.studio_seek is not None
+        assert self.studio_play_button is not None
+        assert self.studio_pause_button is not None
+        assert self.studio_stop_button is not None
+        assert self.editor_tree is not None
+
 
     def build_midi_studio_ui(self):
         build_midi_studio_tab_ui(self)
@@ -282,6 +311,8 @@ class YoutubeMidiApp:
         return f"{minutes:02d}:{whole_seconds:02d}.{milliseconds:03d}"
 
     def on_notebook_tab_changed(self, event=None):
+        assert self.notebook is not None
+        assert self.studio_tab is not None
         if self.notebook.select() == str(self.studio_tab):
             self.load_studio_midi()
 
@@ -318,8 +349,8 @@ class YoutubeMidiApp:
         self.studio_total_duration = max(float(midi.length), absolute_time, 0.0)
         self.studio_event_index = 0
         self.studio_position = 0.0
-        studio_seek = cast(ttk.Scale, self.studio_seek)
-        studio_seek.configure(to=max(self.studio_total_duration, 0.001))
+        assert self.studio_seek is not None
+        self.studio_seek.configure(to=max(self.studio_total_duration, 0.001))
         self.update_studio_position(0.0)
         self.studio_total_time_var.set(
             self.format_studio_time(self.studio_total_duration)
@@ -382,8 +413,11 @@ class YoutubeMidiApp:
 
         self.studio_state = "playing"
         self.studio_started_at = time.perf_counter() - self.studio_position
+        assert self.studio_play_button is not None
         self.studio_play_button.configure(state="disabled")
+        assert self.studio_pause_button is not None
         self.studio_pause_button.configure(state="normal")
+        assert self.studio_stop_button is not None
         self.studio_stop_button.configure(state="normal")
         self.studio_status_var.set("Playing")
         self.studio_tick()
@@ -394,14 +428,17 @@ class YoutubeMidiApp:
 
         position = min(
             self.studio_total_duration,
-            time.perf_counter() - self.studio_started_at,
+                        time.perf_counter() - self.studio_started_at,
         )
         self.update_studio_position(position)
         self.studio_state = "paused"
         self.cancel_studio_tick()
         self.send_studio_all_notes_off()
+        assert self.studio_play_button is not None
         self.studio_play_button.configure(state="normal")
+        assert self.studio_pause_button is not None
         self.studio_pause_button.configure(state="disabled")
+        assert self.studio_stop_button is not None
         self.studio_stop_button.configure(state="normal")
         self.studio_status_var.set("Paused")
 
@@ -418,12 +455,14 @@ class YoutubeMidiApp:
         self.studio_state = "stopped"
         self.studio_event_index = 0
         self.update_studio_position(0.0)
-        if hasattr(self, "studio_play_button"):
-            self.studio_play_button.configure(state="normal")
-            self.studio_pause_button.configure(state="disabled")
-            self.studio_stop_button.configure(state="disabled")
+        if self.studio_play_button:
+                        self.studio_play_button.configure(state="normal")
+        if self.studio_pause_button:
+                        self.studio_pause_button.configure(state="disabled")
+        if self.studio_stop_button:
+                        self.studio_stop_button.configure(state="disabled")
         if self.studio_loaded_path is not None:
-            self.studio_status_var.set("Stopped")
+                        self.studio_status_var.set("Stopped")
 
     def send_studio_all_notes_off(self):
         if self.studio_output is None:
@@ -482,13 +521,16 @@ class YoutubeMidiApp:
             try:
                 self.studio_output.close()
             except Exception:
-                pass
+                                pass
             self.studio_output = None
         self.studio_state = "stopped"
         self.studio_event_index = len(self.studio_events)
         self.update_studio_position(self.studio_total_duration)
+        assert self.studio_play_button is not None
         self.studio_play_button.configure(state="normal")
+        assert self.studio_pause_button is not None
         self.studio_pause_button.configure(state="disabled")
+        assert self.studio_stop_button is not None
         self.studio_stop_button.configure(state="disabled")
         self.studio_status_var.set("Finished")
 
@@ -499,6 +541,7 @@ class YoutubeMidiApp:
         self.root.destroy()
 
     def log_message(self, message):
+        assert self.log is not None
         self.log.configure(state="normal")
         self.log.insert("end", message + "\n")
         self.log.see("end")
@@ -522,30 +565,41 @@ class YoutubeMidiApp:
                 self.update_selected_midi()
                 self.on_key_transpose_changed()
                 self.refresh_converted_outputs()
+                assert self.convert_button is not None
                 self.convert_button.configure(state="normal")
+                assert self.local_audio_button is not None
                 self.local_audio_button.configure(state="normal")
+                assert self.stop_button is not None
                 self.stop_button.configure(state="disabled")
                 self.status_var.set("Conversion finished")
             elif kind == "convert_error":
                 self.converting = False
                 self.convert_cancel_token = None
+                assert self.convert_button is not None
                 self.convert_button.configure(state="normal")
+                assert self.local_audio_button is not None
                 self.local_audio_button.configure(state="normal")
+                assert self.stop_button is not None
                 self.stop_button.configure(state="disabled")
                 self.status_var.set("Conversion failed")
                 messagebox.showerror("Conversion failed", payload)
             elif kind == "convert_cancelled":
                 self.converting = False
                 self.convert_cancel_token = None
+                assert self.convert_button is not None
                 self.convert_button.configure(state="normal")
+                assert self.local_audio_button is not None
                 self.local_audio_button.configure(state="normal")
+                assert self.stop_button is not None
                 self.stop_button.configure(state="disabled")
                 self.status_var.set("Conversion cancelled")
                 self.log_message("Conversion cancelled.")
             elif kind == "play_done":
                 self.playing = False
                 self.unregister_stop_hotkey()
+                assert self.play_button is not None
                 self.play_button.configure(state="normal")
+                assert self.stop_button is not None
                 self.stop_button.configure(state="disabled")
                 self.root.deiconify()
                 self.apply_topmost()
@@ -553,7 +607,9 @@ class YoutubeMidiApp:
             elif kind == "play_error":
                 self.playing = False
                 self.unregister_stop_hotkey()
+                assert self.play_button is not None
                 self.play_button.configure(state="normal")
+                assert self.stop_button is not None
                 self.stop_button.configure(state="disabled")
                 self.root.deiconify()
                 self.apply_topmost()
@@ -581,8 +637,11 @@ class YoutubeMidiApp:
             messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
             return
 
+        assert self.convert_button is not None
         self.convert_button.configure(state="disabled")
+        assert self.local_audio_button is not None
         self.local_audio_button.configure(state="disabled")
+        assert self.stop_button is not None
         self.stop_button.configure(state="normal")
         self.results = None
         self.clear_midi_source_options()
@@ -600,13 +659,16 @@ class YoutubeMidiApp:
             filetypes=[
                 ("Audio files", "*.mp3 *.wav *.m4a *.flac *.ogg *.webm *.aac"),
                 ("All files", "*.*"),
-            ],
+                        ],
         )
         if not filename:
-            return
+                        return
 
+        assert self.convert_button is not None
         self.convert_button.configure(state="disabled")
+        assert self.local_audio_button is not None
         self.local_audio_button.configure(state="disabled")
+        assert self.stop_button is not None
         self.stop_button.configure(state="normal")
         self.results = None
         self.clear_midi_source_options()
@@ -616,7 +678,7 @@ class YoutubeMidiApp:
         self.log_message(f"Starting local audio conversion: {filename}")
 
         thread = threading.Thread(
-            target=self.local_audio_convert_worker, args=(filename,), daemon=True
+                        target=self.local_audio_convert_worker, args=(filename,), daemon=True
         )
         thread.start()
 
@@ -744,31 +806,33 @@ class YoutubeMidiApp:
         except CancelledError:
             self.queue.put(("convert_cancelled", None))
         except Exception as exc:
-            self.queue.put(("convert_error", format_command_error(exc)))
+                        self.queue.put(("convert_error", format_command_error(exc)))
 
     def clear_midi_source_options(self):
         self.available_midi_sources = {}
-        self.midi_source_combo.configure(values=())
+        if self.midi_source_combo:
+                        self.midi_source_combo.configure(values=())
         self.midi_source_var.set("")
         self.selected_midi_var.set("")
 
     def set_midi_source_options(self, sources):
         available = {}
         for label in MIDI_SOURCE_PRIORITY:
-            value = sources.get(label)
-            if not value:
-                continue
-            path = Path(value)
-            if path.exists():
-                available[label] = path
+                        value = sources.get(label)
+                        if not value:
+                            continue
+                        path = Path(value)
+                        if path.exists():
+                            available[label] = path
 
         self.available_midi_sources = available
         labels = tuple(available)
+        assert self.midi_source_combo is not None
         self.midi_source_combo.configure(values=labels)
         if not labels:
-            self.midi_source_var.set("")
-            self.selected_midi_var.set("")
-            return
+                        self.midi_source_var.set("")
+                        self.selected_midi_var.set("")
+                        return
 
         self.midi_source_var.set(labels[0])
         self.on_midi_source_selected()
@@ -927,7 +991,8 @@ class YoutubeMidiApp:
     def refresh_converted_outputs(self):
         self.cached_outputs = list_converted_outputs()
         names = [path.name for path in self.cached_outputs]
-        self.cached_combo.configure(values=names)
+        if self.cached_combo:
+            self.cached_combo.configure(values=names)
         if names and self.cached_choice_var.get() not in names:
             self.cached_choice_var.set(names[0])
         elif not names:
@@ -979,17 +1044,17 @@ class YoutubeMidiApp:
                 return
 
     def get_selected_midi(self):
-        value = self.selected_midi_var.get().strip()
-        if not value:
-            messagebox.showwarning("No MIDI selected", "Convert or open a MIDI file first.")
-            return None
+                value = self.selected_midi_var.get().strip()
+                if not value:
+                    messagebox.showwarning("No MIDI selected", "Convert or open a MIDI file first.")
+                    return None
 
-        midi_path = Path(value)
-        if not midi_path.exists():
-            messagebox.showerror("MIDI not found", str(midi_path))
-            return None
+                midi_path = Path(value)
+                if not midi_path.exists():
+                    messagebox.showerror("MIDI not found", str(midi_path))
+                    return None
 
-        return midi_path
+                return midi_path
 
     def get_cleanup_settings(self):
         try:
@@ -1152,7 +1217,9 @@ class YoutubeMidiApp:
         self.playing = True
         self.stop_event.clear()
         self.register_stop_hotkey()
+        assert self.play_button is not None
         self.play_button.configure(state="disabled")
+        assert self.stop_button is not None
         self.stop_button.configure(state="normal")
         self.status_var.set(f"Hiding window. Focus the game within {countdown} seconds.")
         if start_sec is None:
