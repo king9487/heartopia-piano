@@ -5,7 +5,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-
+from typing import Optional, cast
 import keyboard
 import mido
 
@@ -43,6 +43,8 @@ from transpose import (
     TRANSPOSED_MIDI_NAME,
     transpose_midi_to_key,
 )
+from ui.converter_tab import build_converter_tab
+from ui.midi_studio_tab import build_midi_studio_ui as build_midi_studio_tab_ui
 
 
 MIDI_SOURCE_PRIORITY = (
@@ -124,10 +126,16 @@ class YoutubeMidiApp:
         self.studio_state = "stopped"
         self.studio_output = None
         self.studio_after_id = None
+        self.studio_seek: ttk.Scale | None = None
+        self.studio_play_button: ttk.Button | None = None
+        self.studio_pause_button: ttk.Button | None = None
+        self.studio_stop_button: ttk.Button | None = None
+        self.editor_tree: ttk.Treeview | None = None
         self.studio_updating_slider = False
         self.editor_source_path = None
         self.editor_notes = []
         self.editor_suspicious_reasons = {}
+        self.editor_tree: Optional[ttk.Treeview] = None
 
         self.build_ui()
         self.refresh_converted_outputs()
@@ -150,471 +158,11 @@ class YoutubeMidiApp:
         self.main_tab.columnconfigure(0, weight=1)
         self.main_tab.rowconfigure(7, weight=1)
 
-        top = ttk.Frame(self.main_tab, padding=12)
-        top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(1, weight=1)
-
-        ttk.Label(top, text="YouTube URL").grid(row=0, column=0, sticky="w")
-        url_entry = ttk.Entry(top, textvariable=self.url_var)
-        url_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
-        url_entry.focus_set()
-
-        self.convert_button = ttk.Button(top, text="Convert URL", command=self.start_convert)
-        self.convert_button.grid(row=0, column=2, sticky="e")
-        self.local_audio_button = ttk.Button(
-            top, text="Open Audio", command=self.start_local_audio_convert
-        )
-        self.local_audio_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
-
-        options = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        options.grid(row=1, column=0, sticky="ew")
-        options.columnconfigure(4, weight=1)
-
-        ttk.Checkbutton(
-            options,
-            text="Always on top",
-            variable=self.always_top_var,
-            command=self.apply_topmost,
-        ).grid(row=0, column=0, sticky="w")
-
-        ttk.Label(options, text="Speed").grid(row=0, column=1, sticky="w", padx=(18, 4))
-        ttk.Spinbox(
-            options,
-            from_=0.25,
-            to=3.0,
-            increment=0.25,
-            textvariable=self.speed_var,
-            width=6,
-        ).grid(row=0, column=2, sticky="w")
-
-        ttk.Label(options, text="Focus delay").grid(row=0, column=3, sticky="w", padx=(18, 4))
-        ttk.Spinbox(
-            options,
-            from_=1,
-            to=10,
-            increment=1,
-            textvariable=self.countdown_var,
-            width=5,
-        ).grid(row=0, column=4, sticky="w")
-
-        ttk.Label(options, text="Demucs").grid(row=0, column=5, sticky="w", padx=(18, 4))
-        ttk.Combobox(
-            options,
-            textvariable=self.demucs_device_var,
-            values=("cuda:0", "auto", "cpu"),
-            state="readonly",
-            width=8,
-        ).grid(row=0, column=6, sticky="w")
-
-        ttk.Checkbutton(
-            options,
-            text="Convert vocals MIDI",
-            variable=self.convert_vocals_midi_var,
-        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
-
-        timing = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        timing.grid(row=2, column=0, sticky="ew")
-        timing.columnconfigure(6, weight=1)
-
-        ttk.Label(timing, text="Transpose").grid(row=0, column=0, sticky="w")
-        ttk.Spinbox(
-            timing,
-            from_=-36,
-            to=36,
-            increment=1,
-            textvariable=self.transpose_var,
-            width=6,
-        ).grid(row=0, column=1, sticky="w", padx=(4, 18))
-
-        ttk.Label(timing, text="Chord gap ms").grid(row=0, column=2, sticky="w")
-        ttk.Spinbox(
-            timing,
-            from_=0,
-            to=80,
-            increment=2,
-            textvariable=self.chord_delay_var,
-            width=6,
-        ).grid(row=0, column=3, sticky="w", padx=(4, 18))
-
-        ttk.Label(timing, text="Min hold ms").grid(row=0, column=4, sticky="w")
-        ttk.Spinbox(
-            timing,
-            from_=20,
-            to=250,
-            increment=5,
-            textvariable=self.min_hold_var,
-            width=6,
-        ).grid(row=0, column=5, sticky="w", padx=(4, 0))
-
-        cleanup = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        cleanup.grid(row=3, column=0, sticky="ew")
-        cleanup.columnconfigure(7, weight=1)
-
-        ttk.Label(cleanup, text="Min note ms").grid(row=0, column=0, sticky="w")
-        ttk.Spinbox(
-            cleanup,
-            from_=0,
-            to=500,
-            increment=5,
-            textvariable=self.min_note_duration_var,
-            width=6,
-        ).grid(row=0, column=1, sticky="w", padx=(4, 18))
-
-        ttk.Label(cleanup, text="Velocity").grid(row=0, column=2, sticky="w")
-        ttk.Spinbox(
-            cleanup,
-            from_=0,
-            to=127,
-            increment=1,
-            textvariable=self.velocity_threshold_var,
-            width=6,
-        ).grid(row=0, column=3, sticky="w", padx=(4, 18))
-
-        ttk.Label(cleanup, text="Max notes").grid(row=0, column=4, sticky="w")
-        ttk.Spinbox(
-            cleanup,
-            from_=0,
-            to=12,
-            increment=1,
-            textvariable=self.max_simultaneous_var,
-            width=6,
-        ).grid(row=0, column=5, sticky="w", padx=(4, 18))
-
-        ttk.Label(cleanup, text="Range mode").grid(row=0, column=6, sticky="w")
-        ttk.Combobox(
-            cleanup,
-            textvariable=self.octave_fit_var,
-            values=("smart", "drop", "octave_shift"),
-            state="readonly",
-            width=12,
-        ).grid(row=0, column=7, sticky="w", padx=(4, 0))
-
-        ttk.Checkbutton(
-            cleanup,
-            text="Melody only",
-            variable=self.melody_only_var,
-        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
-
-        ttk.Label(cleanup, text="Melody notes").grid(
-            row=1, column=2, sticky="w", pady=(8, 0)
-        )
-        ttk.Spinbox(
-            cleanup,
-            from_=1,
-            to=3,
-            increment=1,
-            textvariable=self.melody_max_notes_var,
-            width=6,
-        ).grid(row=1, column=3, sticky="w", padx=(4, 18), pady=(8, 0))
-
-        ttk.Label(cleanup, text="Window ms").grid(
-            row=1, column=4, sticky="w", pady=(8, 0)
-        )
-        ttk.Spinbox(
-            cleanup,
-            from_=20,
-            to=250,
-            increment=10,
-            textvariable=self.melody_window_var,
-            width=6,
-        ).grid(row=1, column=5, sticky="w", padx=(4, 18), pady=(8, 0))
-
-        key_transpose = ttk.LabelFrame(
-            self.main_tab, text="Key Transpose", padding=(10, 6, 10, 8)
-        )
-        key_transpose.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 8))
-
-        ttk.Label(key_transpose, text="Original Key").grid(row=0, column=0, sticky="w")
-        original_key_combo = ttk.Combobox(
-            key_transpose,
-            textvariable=self.original_key_var,
-            values=("Auto Detect", *KEY_NAMES),
-            state="readonly",
-            width=12,
-        )
-        original_key_combo.grid(row=0, column=1, sticky="w", padx=(6, 18))
-        original_key_combo.bind("<<ComboboxSelected>>", self.on_key_transpose_changed)
-
-        ttk.Label(key_transpose, text="Target Key").grid(row=0, column=2, sticky="w")
-        target_key_combo = ttk.Combobox(
-            key_transpose,
-            textvariable=self.target_key_var,
-            values=("Original", *KEY_NAMES),
-            state="readonly",
-            width=12,
-        )
-        target_key_combo.grid(row=0, column=3, sticky="w", padx=(6, 18))
-        target_key_combo.bind("<<ComboboxSelected>>", self.on_key_transpose_changed)
-
-        ttk.Label(key_transpose, textvariable=self.detected_key_var).grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(8, 0)
-        )
-        ttk.Label(key_transpose, textvariable=self.key_transpose_status_var).grid(
-            row=1, column=2, columnspan=2, sticky="w", pady=(8, 0)
-        )
-
-        midi_panel = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        midi_panel.grid(row=5, column=0, sticky="ew")
-        midi_panel.columnconfigure(5, weight=1)
-
-        ttk.Radiobutton(
-            midi_panel,
-            text="Vocals MIDI",
-            value="vocal_midi",
-            variable=self.midi_choice_var,
-            command=self.update_selected_midi,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Radiobutton(
-            midi_panel,
-            text="Accompaniment MIDI",
-            value="accompaniment_midi",
-            variable=self.midi_choice_var,
-            command=self.update_selected_midi,
-        ).grid(row=0, column=1, sticky="w", padx=(12, 0))
-
-        ttk.Button(midi_panel, text="Open MIDI", command=self.open_midi).grid(
-            row=0, column=2, padx=(12, 0)
-        )
-        ttk.Button(midi_panel, text="Open Converted", command=self.open_converted).grid(
-            row=0, column=3, padx=(8, 0)
-        )
-        ttk.Button(midi_panel, text="Preview", command=self.preview_selected_midi).grid(
-            row=0, column=4, padx=(8, 0)
-        )
-        self.play_button = ttk.Button(
-            midi_panel, text="Play to Game", command=self.start_keyboard_playback
-        )
-        self.play_button.grid(row=0, column=5, sticky="e")
-        self.stop_button = ttk.Button(
-            midi_panel, text="Stop", command=self.stop_current_task, state="disabled"
-        )
-        self.stop_button.grid(row=0, column=6, sticky="e", padx=(8, 0))
-
-        ttk.Label(midi_panel, text="Converted").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        self.cached_combo = ttk.Combobox(
-            midi_panel, textvariable=self.cached_choice_var, state="readonly"
-        )
-        self.cached_combo.grid(row=1, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Button(midi_panel, text="Refresh", command=self.refresh_converted_outputs).grid(
-            row=1, column=4, sticky="w", padx=(8, 0), pady=(8, 0)
-        )
-        ttk.Button(midi_panel, text="Load", command=self.load_selected_converted).grid(
-            row=1, column=5, sticky="w", padx=(8, 0), pady=(8, 0)
-        )
-        ttk.Label(midi_panel, text="MIDI source").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.midi_source_combo = ttk.Combobox(
-            midi_panel,
-            textvariable=self.midi_source_var,
-            state="readonly",
-            width=24,
-        )
-        self.midi_source_combo.grid(
-            row=2, column=1, columnspan=3, sticky="w", padx=(8, 0), pady=(8, 0)
-        )
-        self.midi_source_combo.bind(
-            "<<ComboboxSelected>>", self.on_midi_source_selected
-        )
-        ttk.Label(midi_panel, text="Optimizer").grid(row=2, column=4, sticky="e", pady=(8, 0))
-        ttk.Combobox(
-            midi_panel,
-            textvariable=self.optimizer_mode_var,
-            values=("None", "Rule", "OpenAI"),
-            state="readonly",
-            width=8,
-        ).grid(row=2, column=5, sticky="w", padx=(4, 0), pady=(8, 0))
-        ttk.Button(midi_panel, text="Optimize MIDI", command=self.start_optimize_midi).grid(
-            row=2, column=6, sticky="w", padx=(8, 0), pady=(8, 0)
-        )
-
-        ttk.Label(midi_panel, text="Start seconds").grid(
-            row=3, column=0, sticky="w", pady=(8, 0)
-        )
-        ttk.Spinbox(
-            midi_panel,
-            from_=0,
-            to=86400,
-            increment=1,
-            textvariable=self.range_start_var,
-            width=8,
-        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-        ttk.Label(midi_panel, text="End seconds").grid(
-            row=3, column=2, sticky="e", padx=(12, 0), pady=(8, 0)
-        )
-        ttk.Spinbox(
-            midi_panel,
-            from_=0.1,
-            to=86400,
-            increment=1,
-            textvariable=self.range_end_var,
-            width=8,
-        ).grid(row=3, column=3, sticky="w", padx=(8, 0), pady=(8, 0))
-        ttk.Button(midi_panel, text="Play Range", command=self.start_range_playback).grid(
-            row=3, column=4, sticky="e", padx=(8, 0), pady=(8, 0)
-        )
-        ttk.Button(midi_panel, text="Export Range", command=self.export_selected_range).grid(
-            row=3, column=5, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
-        )
-
-        selected = ttk.Label(
-            self.main_tab,
-            textvariable=self.selected_midi_var,
-            padding=(12, 0, 12, 8),
-            foreground="#444",
-        )
-        selected.grid(row=6, column=0, sticky="new")
-
-        log_frame = ttk.Frame(self.main_tab, padding=(12, 0, 12, 8))
-        log_frame.grid(row=7, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-
-        self.log = tk.Text(log_frame, height=16, wrap="word", state="disabled")
-        self.log.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.log.configure(yscrollcommand=scrollbar.set)
-
-        status = ttk.Label(
-            self.main_tab, textvariable=self.status_var, padding=(12, 0, 12, 12)
-        )
-        status.grid(row=8, column=0, sticky="ew")
-
+        build_converter_tab(self)
         self.build_midi_studio_ui()
 
     def build_midi_studio_ui(self):
-        self.studio_tab.columnconfigure(0, weight=1)
-        self.studio_tab.rowconfigure(3, weight=1)
-
-        source = ttk.Frame(self.studio_tab, padding=(12, 12, 12, 8))
-        source.grid(row=0, column=0, sticky="ew")
-        source.columnconfigure(1, weight=1)
-        ttk.Label(source, text="Selected MIDI").grid(row=0, column=0, sticky="w")
-        ttk.Label(source, textvariable=self.selected_midi_var, foreground="#444").grid(
-            row=0, column=1, sticky="ew", padx=(8, 0)
-        )
-
-        controls = ttk.Frame(self.studio_tab, padding=(12, 0, 12, 8))
-        controls.grid(row=1, column=0, sticky="ew")
-        controls.columnconfigure(6, weight=1)
-        self.studio_play_button = ttk.Button(
-            controls, text="Play", command=self.play_studio_midi
-        )
-        self.studio_play_button.grid(row=0, column=0, sticky="w")
-        self.studio_pause_button = ttk.Button(
-            controls, text="Pause", command=self.pause_studio_midi, state="disabled"
-        )
-        self.studio_pause_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        self.studio_stop_button = ttk.Button(
-            controls, text="Stop", command=self.stop_studio_midi, state="disabled"
-        )
-        self.studio_stop_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
-        ttk.Label(controls, textvariable=self.studio_current_time_var).grid(
-            row=0, column=3, sticky="e", padx=(20, 4)
-        )
-        ttk.Label(controls, text="/").grid(row=0, column=4)
-        ttk.Label(controls, textvariable=self.studio_total_time_var).grid(
-            row=0, column=5, sticky="w", padx=(4, 0)
-        )
-        ttk.Label(controls, textvariable=self.studio_status_var).grid(
-            row=0, column=6, sticky="e", padx=(16, 0)
-        )
-
-        self.studio_seek = ttk.Scale(
-            self.studio_tab,
-            from_=0,
-            to=1,
-            variable=self.studio_position_var,
-            command=self.on_studio_seek,
-        )
-        self.studio_seek.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
-
-        editor = ttk.Frame(self.studio_tab, padding=(12, 0, 12, 8))
-        editor.grid(row=3, column=0, sticky="nsew")
-        editor.columnconfigure(0, weight=1)
-        editor.rowconfigure(1, weight=1)
-
-        editor_actions = ttk.Frame(editor)
-        editor_actions.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        ttk.Button(
-            editor_actions,
-            text="Open Selected MIDI",
-            command=self.open_selected_midi_in_editor,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Button(
-            editor_actions,
-            text="Delete selected notes",
-            command=self.delete_selected_editor_notes,
-        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Button(
-            editor_actions,
-            text="Delete same pitch",
-            command=self.delete_same_pitch_editor_notes,
-        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
-        ttk.Button(
-            editor_actions,
-            text="Delete suspicious notes",
-            command=self.delete_suspicious_editor_notes,
-        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Button(
-            editor_actions,
-            text="Save as edited_37key.mid",
-            command=self.save_editor_midi,
-        ).grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
-
-        columns = (
-            "start_ms",
-            "duration_ms",
-            "note",
-            "note_name",
-            "velocity",
-            "suspicious_reason",
-        )
-        self.editor_tree = ttk.Treeview(
-            editor,
-            columns=columns,
-            show="headings",
-            selectmode="extended",
-        )
-        headings = {
-            "start_ms": "start_ms",
-            "duration_ms": "duration_ms",
-            "note": "note",
-            "note_name": "note_name",
-            "velocity": "velocity",
-            "suspicious_reason": "suspicious_reason",
-        }
-        widths = {
-            "start_ms": 90,
-            "duration_ms": 95,
-            "note": 55,
-            "note_name": 75,
-            "velocity": 65,
-            "suspicious_reason": 260,
-        }
-        for column in columns:
-            self.editor_tree.heading(column, text=headings[column])
-            self.editor_tree.column(
-                column,
-                width=widths[column],
-                minwidth=45,
-                stretch=column == "suspicious_reason",
-                anchor="w" if column == "suspicious_reason" else "center",
-            )
-        self.editor_tree.tag_configure("suspicious", foreground="#b42318")
-        self.editor_tree.grid(row=1, column=0, sticky="nsew")
-        editor_scrollbar = ttk.Scrollbar(
-            editor, orient="vertical", command=self.editor_tree.yview
-        )
-        editor_scrollbar.grid(row=1, column=1, sticky="ns")
-        self.editor_tree.configure(yscrollcommand=editor_scrollbar.set)
-
-        self.studio_canvas = tk.Canvas(
-            self.studio_tab,
-            background="#202225",
-            highlightthickness=0,
-            height=80,
-        )
-        self.studio_canvas.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
+        build_midi_studio_tab_ui(self)
 
     def open_selected_midi_in_editor(self):
         midi_path = self.get_selected_midi()
@@ -631,6 +179,9 @@ class YoutubeMidiApp:
         self.studio_status_var.set(f"Editor: {len(self.editor_notes)} notes")
 
     def refresh_editor_tree(self):
+        if self.editor_tree is None:
+            return
+
         self.editor_suspicious_reasons = find_suspicious_notes(self.editor_notes)
         children = self.editor_tree.get_children()
         if children:
@@ -654,6 +205,9 @@ class YoutubeMidiApp:
             )
 
     def selected_editor_indices(self):
+        if self.editor_tree is None:
+            return set()
+
         return {int(item_id) for item_id in self.editor_tree.selection()}
 
     def delete_selected_editor_notes(self):
@@ -764,7 +318,8 @@ class YoutubeMidiApp:
         self.studio_total_duration = max(float(midi.length), absolute_time, 0.0)
         self.studio_event_index = 0
         self.studio_position = 0.0
-        self.studio_seek.configure(to=max(self.studio_total_duration, 0.001))
+        studio_seek = cast(ttk.Scale, self.studio_seek)
+        studio_seek.configure(to=max(self.studio_total_duration, 0.001))
         self.update_studio_position(0.0)
         self.studio_total_time_var.set(
             self.format_studio_time(self.studio_total_duration)
