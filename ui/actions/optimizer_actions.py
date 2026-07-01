@@ -11,15 +11,18 @@ class UiOptimizerActionsMixin:
             return
 
         mode = self.optimizer_mode_var.get().strip().lower()
-        if mode == "none":
+        arrangement_style = self.arrangement_style_var.get().strip().lower()
+        if mode == "none" and arrangement_style == "original":
             messagebox.showwarning(
-                "Optimizer disabled", "Choose Piano Cover, Rule, or OpenAI first."
+                "Optimizer disabled",
+                "Choose Rule/OpenAI or select a simplified arrangement style first.",
             )
             return
 
         try:
             options = {
                 "mode": mode,
+                "arrangement_style": arrangement_style,
                 "max_notes_per_window": max(
                     1, min(int(self.melody_max_notes_var.get()), 3)
                 ),
@@ -31,7 +34,9 @@ class UiOptimizerActionsMixin:
 
         self.status_var.set("Optimizing MIDI")
         self.log_message(
-            f"Optimizing MIDI with {self.optimizer_mode_var.get()} mode: {midi_path}"
+            "Optimizing MIDI with "
+            f"{self.arrangement_style_var.get()} arrangement / "
+            f"{self.optimizer_mode_var.get()} mode: {midi_path}"
         )
         thread = threading.Thread(
             target=self.optimize_worker,

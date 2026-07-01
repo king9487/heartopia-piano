@@ -55,6 +55,38 @@ class PianoCoverArrangementTests(unittest.TestCase):
             self.assertTrue(all(36 <= item.note <= 72 for item in output_notes))
             self.assertLessEqual(len([item for item in output_notes if item.start < 0.01]), 3)
 
+    def test_arrangement_style_selects_piano_cover(self):
+        source = [note(0, 0.5, 48), note(0, 0.5, 64), note(0, 0.5, 76)]
+        with TemporaryDirectory() as directory:
+            input_midi = Path(directory) / "source.mid"
+            write_clean_midi(source, input_midi)
+            result = post_process_37key_midi(
+                input_midi,
+                options={"mode": "rule", "arrangement_style": "piano_cover"},
+            )
+            self.assertEqual(result["piano_cover_midi"].name, "piano_cover_37key.mid")
+            self.assertEqual(result["arrangement_mode"], "Piano Cover")
+
+    def test_melody_only_style_outputs_one_highest_line(self):
+        source = [
+            note(0, 0.5, 48),
+            note(0, 0.5, 60),
+            note(0, 0.5, 67),
+            note(0.6, 0.5, 50),
+            note(0.6, 0.5, 69),
+        ]
+        with TemporaryDirectory() as directory:
+            input_midi = Path(directory) / "source.mid"
+            write_clean_midi(source, input_midi)
+            result = post_process_37key_midi(
+                input_midi,
+                options={"mode": "rule", "arrangement_style": "melody_only"},
+            )
+            output_notes = read_midi_notes(result["final_midi"])
+            self.assertEqual(result["arrangement_mode"], "Melody Only")
+            self.assertEqual(len([item for item in output_notes if item.start < 0.01]), 1)
+            self.assertTrue(all(36 <= item.note <= 72 for item in output_notes))
+
 
 if __name__ == "__main__":
     unittest.main()

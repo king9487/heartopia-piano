@@ -43,17 +43,29 @@ def build_cleanup_panel(app, parent, start_row=0):
         arrangement, from_=20, to=250, increment=10,
         textvariable=app.melody_window_var, width=8,
     ).grid(row=0, column=3, sticky="w", padx=(8, 24))
-    ttk.Label(arrangement, text="Optimizer mode").grid(row=0, column=4, sticky="w")
+    ttk.Label(arrangement, text="Arrangement style").grid(
+        row=1, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Combobox(
+        arrangement,
+        textvariable=app.arrangement_style_var,
+        values=("original", "melody_only", "piano_cover"),
+        state="readonly",
+        width=12,
+    ).grid(row=1, column=1, sticky="w", padx=(8, 24), pady=(8, 0))
+    ttk.Label(arrangement, text="Optimizer mode").grid(
+        row=1, column=2, sticky="w", pady=(8, 0)
+    )
     ttk.Combobox(
         arrangement,
         textvariable=app.optimizer_mode_var,
-        values=("None", "Piano Cover", "Rule", "OpenAI"),
+        values=("None", "Rule", "OpenAI"),
         state="readonly",
         width=12,
-    ).grid(row=0, column=5, sticky="w", padx=(8, 12))
+    ).grid(row=1, column=3, sticky="w", padx=(8, 24), pady=(8, 0))
     ttk.Button(
         arrangement, text="Optimize MIDI", command=app.start_optimize_midi
-    ).grid(row=0, column=6, sticky="w")
+    ).grid(row=1, column=4, sticky="w", pady=(8, 0))
 
     key_transpose = ttk.LabelFrame(parent, text="Key Transpose", padding=12)
     key_transpose.grid(row=start_row + 2, column=0, sticky="new", padx=12, pady=(0, 12))

@@ -66,6 +66,7 @@ class YoutubeMidiApp(
     melody_only_var: Any
     melody_max_notes_var: Any
     melody_window_var: Any
+    arrangement_style_var: Any
     optimizer_mode_var: Any
     original_key_var: Any
     target_key_var: Any
