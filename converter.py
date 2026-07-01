@@ -5,7 +5,9 @@ import re
 from midi_ai_optimizer import (
     AI_OPTIMIZED_MIDI_NAME,
     FINAL_37KEY_MIDI_NAME,
+    PIANO_COVER_MIDI_NAME,
     PITCH_CORRECTED_MIDI_NAME,
+    arrange_piano_cover_midi,
     detect_key_for_midi,
     post_process_37key_midi,
 )
@@ -19,6 +21,7 @@ GENERATED_MIDI_NAMES = {
     AI_OPTIMIZED_MIDI_NAME,
     PITCH_CORRECTED_MIDI_NAME,
     FINAL_37KEY_MIDI_NAME,
+    PIANO_COVER_MIDI_NAME,
 }
 
 
@@ -97,6 +100,10 @@ def pitch_corrected_midi_path(raw_or_clean_midi):
     return Path(raw_or_clean_midi).with_name(PITCH_CORRECTED_MIDI_NAME)
 
 
+def piano_cover_midi_path(raw_midi):
+    return Path(raw_midi).with_name(PIANO_COVER_MIDI_NAME)
+
+
 def ensure_clean_37key_midi(raw_midi, options=None):
     output_midi = clean_37key_midi_path(raw_midi)
     if output_midi.exists() and output_midi.stat().st_mtime >= Path(raw_midi).stat().st_mtime:
@@ -115,6 +122,17 @@ def ensure_clean_37key_midi(raw_midi, options=None):
 
 
 def ensure_full_post_processing(raw_midi, options=None):
+    raw_midi = Path(raw_midi)
+    piano_cover_midi = piano_cover_midi_path(raw_midi)
+    if (
+        not piano_cover_midi.exists()
+        or piano_cover_midi.stat().st_mtime < raw_midi.stat().st_mtime
+    ):
+        print("Generating Piano Cover MIDI:", piano_cover_midi)
+        arrange_piano_cover_midi(raw_midi, output_midi=piano_cover_midi, options=options)
+    else:
+        print("Using existing Piano Cover MIDI:", piano_cover_midi)
+
     clean_midi = ensure_clean_37key_midi(raw_midi, options=options)
     ai_midi = ai_optimized_midi_path(clean_midi)
     pitch_midi = pitch_corrected_midi_path(clean_midi)
@@ -144,6 +162,7 @@ def ensure_full_post_processing(raw_midi, options=None):
         print("Detected key:", detected_key)
 
     return {
+        "piano_cover_midi": piano_cover_midi,
         "clean_midi": clean_midi,
         "ai_optimized_midi": ai_midi,
         "pitch_corrected_midi": pitch_midi,
@@ -165,6 +184,8 @@ def results_from_output_dir(base_dir):
 
     vocal_clean_midi = clean_37key_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_clean_midi = clean_37key_midi_path(accompaniment_midi)
+    vocal_piano_midi = piano_cover_midi_path(vocal_midi) if vocal_midi else None
+    accompaniment_piano_midi = piano_cover_midi_path(accompaniment_midi)
     vocal_ai_midi = ai_optimized_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_ai_midi = ai_optimized_midi_path(accompaniment_midi)
     vocal_pitch_midi = pitch_corrected_midi_path(vocal_midi) if vocal_midi else None
@@ -179,6 +200,12 @@ def results_from_output_dir(base_dir):
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_piano_cover_midi": (
+            vocal_piano_midi if vocal_piano_midi and vocal_piano_midi.exists() else None
+        ),
+        "accompaniment_piano_cover_midi": (
+            accompaniment_piano_midi if accompaniment_piano_midi.exists() else None
+        ),
         "vocal_clean_midi": (
             vocal_clean_midi if vocal_clean_midi and vocal_clean_midi.exists() else None
         ),
@@ -222,6 +249,7 @@ def ensure_clean_results(results, include_vocals=False):
 
     if include_vocals and results.get("vocal_midi"):
         vocal_outputs = ensure_full_post_processing(results["vocal_midi"])
+        results["vocal_piano_cover_midi"] = vocal_outputs["piano_cover_midi"]
         results["vocal_clean_midi"] = vocal_outputs["clean_midi"]
         results["vocal_ai_optimized_midi"] = vocal_outputs["ai_optimized_midi"]
         results["vocal_pitch_corrected_midi"] = vocal_outputs["pitch_corrected_midi"]
@@ -229,6 +257,7 @@ def ensure_clean_results(results, include_vocals=False):
         results["vocal_detected_key"] = vocal_outputs["detected_key"]
     if results.get("accompaniment_midi"):
         accompaniment_outputs = ensure_full_post_processing(results["accompaniment_midi"])
+        results["accompaniment_piano_cover_midi"] = accompaniment_outputs["piano_cover_midi"]
         results["accompaniment_clean_midi"] = accompaniment_outputs["clean_midi"]
         results["accompaniment_ai_optimized_midi"] = accompaniment_outputs["ai_optimized_midi"]
         results["accompaniment_pitch_corrected_midi"] = accompaniment_outputs[
@@ -419,20 +448,23 @@ def youtube_to_midi(
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
-    print("Step 5: Generating Clean, AI Optimized, and Final 37-Key MIDI files...")
+    print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
     if vocal_midi:
         vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_piano_cover_midi = vocal_outputs["piano_cover_midi"]
         vocal_clean_midi = vocal_outputs["clean_midi"]
         vocal_ai_optimized_midi = vocal_outputs["ai_optimized_midi"]
         vocal_pitch_corrected_midi = vocal_outputs["pitch_corrected_midi"]
         vocal_final_midi = vocal_outputs["final_midi"]
         vocal_detected_key = vocal_outputs["detected_key"]
     else:
+        vocal_piano_cover_midi = None
         vocal_ai_optimized_midi = None
         vocal_pitch_corrected_midi = None
         vocal_final_midi = None
         vocal_detected_key = None
     accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_piano_cover_midi = accompaniment_outputs["piano_cover_midi"]
     accompaniment_clean_midi = accompaniment_outputs["clean_midi"]
     accompaniment_ai_optimized_midi = accompaniment_outputs["ai_optimized_midi"]
     accompaniment_pitch_corrected_midi = accompaniment_outputs["pitch_corrected_midi"]
@@ -446,6 +478,8 @@ def youtube_to_midi(
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_piano_cover_midi": vocal_piano_cover_midi,
+        "accompaniment_piano_cover_midi": accompaniment_piano_cover_midi,
         "vocal_clean_midi": vocal_clean_midi,
         "accompaniment_clean_midi": accompaniment_clean_midi,
         "vocal_ai_optimized_midi": vocal_ai_optimized_midi,
@@ -505,20 +539,23 @@ def audio_file_to_midi(
         no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
     )
 
-    print("Step 5: Generating Clean, AI Optimized, and Final 37-Key MIDI files...")
+    print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
     if vocal_midi:
         vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_piano_cover_midi = vocal_outputs["piano_cover_midi"]
         vocal_clean_midi = vocal_outputs["clean_midi"]
         vocal_ai_optimized_midi = vocal_outputs["ai_optimized_midi"]
         vocal_pitch_corrected_midi = vocal_outputs["pitch_corrected_midi"]
         vocal_final_midi = vocal_outputs["final_midi"]
         vocal_detected_key = vocal_outputs["detected_key"]
     else:
+        vocal_piano_cover_midi = None
         vocal_ai_optimized_midi = None
         vocal_pitch_corrected_midi = None
         vocal_final_midi = None
         vocal_detected_key = None
     accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_piano_cover_midi = accompaniment_outputs["piano_cover_midi"]
     accompaniment_clean_midi = accompaniment_outputs["clean_midi"]
     accompaniment_ai_optimized_midi = accompaniment_outputs["ai_optimized_midi"]
     accompaniment_pitch_corrected_midi = accompaniment_outputs["pitch_corrected_midi"]
@@ -532,6 +569,8 @@ def audio_file_to_midi(
         "no_vocals": no_vocals,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
+        "vocal_piano_cover_midi": vocal_piano_cover_midi,
+        "accompaniment_piano_cover_midi": accompaniment_piano_cover_midi,
         "vocal_clean_midi": vocal_clean_midi,
         "accompaniment_clean_midi": accompaniment_clean_midi,
         "vocal_ai_optimized_midi": vocal_ai_optimized_midi,

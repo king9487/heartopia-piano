@@ -14,6 +14,10 @@ def choose_midi_file(results):
         choices.append(
             ("accompaniment transposed", results["accompaniment_transposed_midi"])
         )
+    if results.get("accompaniment_piano_cover_midi"):
+        choices.append(
+            ("accompaniment piano cover", results["accompaniment_piano_cover_midi"])
+        )
     choices.append(
         (
             "accompaniment final 37-key",
@@ -82,7 +86,8 @@ def apply_cli_key_transpose(results, original_key, target_key):
         return None
 
     source_midi = (
-        results.get("accompaniment_final_midi")
+        results.get("accompaniment_piano_cover_midi")
+        or results.get("accompaniment_final_midi")
         or results.get("accompaniment_pitch_corrected_midi")
         or results.get("accompaniment_ai_optimized_midi")
         or results.get("accompaniment_clean_midi")
@@ -150,6 +155,8 @@ def main(argv=None):
     print("Accompaniment WAV:", results["no_vocals"])
     print("Vocals MIDI:", results.get("vocal_midi"))
     print("Accompaniment MIDI:", results["accompaniment_midi"])
+    print("Vocals Piano Cover MIDI:", results.get("vocal_piano_cover_midi"))
+    print("Accompaniment Piano Cover MIDI:", results.get("accompaniment_piano_cover_midi"))
     print("Vocals Clean 37-Key MIDI:", results.get("vocal_clean_midi"))
     print("Accompaniment Clean 37-Key MIDI:", results.get("accompaniment_clean_midi"))
     print("Vocals AI Optimized MIDI:", results.get("vocal_ai_optimized_midi"))

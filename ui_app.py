@@ -1,72 +1,118 @@
-import bisect
 from pathlib import Path
-import queue
-import threading
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from typing import Optional, cast
-import keyboard
-import mido
+from typing import Any
 
 from converter import (
-    audio_file_to_midi,
     ensure_clean_results,
     list_converted_outputs,
     results_from_output_dir,
-    youtube_to_midi,
-)
-from midi_ai_optimizer import (
-    AI_OPTIMIZED_MIDI_NAME,
-    FINAL_37KEY_MIDI_NAME,
-    PITCH_CORRECTED_MIDI_NAME,
-    post_process_37key_midi,
-)
-from midi_editor import (
-    EDITED_37KEY_MIDI_NAME,
-    find_suspicious_notes,
-    load_editor_notes,
-    save_edited_midi,
-)
-from midi_range import CHORUS_MIDI_NAME, export_midi_range
-from midi_rule_engine import CLEAN_37KEY_MIDI_NAME
-from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
-from tools import (
-    CancellationToken,
-    CancelledError,
-    check_cli_dependencies,
-    default_demucs_device,
-    format_command_error,
 )
 from transpose import (
-    KEY_NAMES,
     TRANSPOSED_MIDI_NAME,
     transpose_midi_to_key,
 )
-from ui.converter_tab import build_converter_tab
-from ui.midi_studio_tab import build_midi_studio_ui as build_midi_studio_tab_ui
+from ui_convert_actions import UiConvertActionsMixin
+from ui_editor_actions import UiEditorActionsMixin
+from ui_log_helpers import UiLogHelpersMixin
+from ui_main_panel import build_application_ui
+from ui_optimizer_actions import UiOptimizerActionsMixin
+from ui_playback_actions import UiPlaybackActionsMixin
+from ui_queue_handlers import UiQueueHandlersMixin
+from ui_selection import MidiSelectionMixin
+from ui_state import initialize_app_state
+from ui_studio_actions import UiStudioActionsMixin
 
 
-MIDI_SOURCE_PRIORITY = (
-    "Transposed MIDI",
-    "Edited MIDI",
-    "Final 37-Key MIDI",
-    "Pitch Corrected MIDI",
-    "AI Optimized MIDI",
-    "Clean 37-Key MIDI",
-    "Raw MIDI",
-)
-MIDI_SOURCE_FILENAMES = {
-    "Transposed MIDI": TRANSPOSED_MIDI_NAME,
-    "Edited MIDI": EDITED_37KEY_MIDI_NAME,
-    "Final 37-Key MIDI": FINAL_37KEY_MIDI_NAME,
-    "Pitch Corrected MIDI": PITCH_CORRECTED_MIDI_NAME,
-    "AI Optimized MIDI": AI_OPTIMIZED_MIDI_NAME,
-    "Clean 37-Key MIDI": CLEAN_37KEY_MIDI_NAME,
-}
+class YoutubeMidiApp(
+    UiConvertActionsMixin,
+    UiPlaybackActionsMixin,
+    UiOptimizerActionsMixin,
+    UiEditorActionsMixin,
+    UiStudioActionsMixin,
+    UiQueueHandlersMixin,
+    UiLogHelpersMixin,
+    MidiSelectionMixin,
+):
+    # State is initialized by initialize_app_state(). These declarations keep
+    # IDEs and static checkers aware of the attributes shared by the mixins.
+    queue: Any
+    results: Any
+    converting: bool
+    convert_cancel_token: Any
+    playing: bool
+    stop_event: Any
+    stop_hotkey: Any
 
+    url_var: Any
+    always_top_var: Any
+    midi_choice_var: Any
+    midi_source_var: Any
+    available_midi_sources: dict
+    convert_vocals_midi_var: Any
+    selected_midi_var: Any
+    cached_choice_var: Any
+    cached_outputs: list
+    demucs_device_var: Any
+    speed_var: Any
+    countdown_var: Any
+    transpose_var: Any
+    chord_delay_var: Any
+    min_hold_var: Any
+    min_note_duration_var: Any
+    velocity_threshold_var: Any
+    max_simultaneous_var: Any
+    octave_fit_var: Any
+    melody_only_var: Any
+    melody_max_notes_var: Any
+    melody_window_var: Any
+    optimizer_mode_var: Any
+    original_key_var: Any
+    target_key_var: Any
+    detected_key_var: Any
+    key_transpose_status_var: Any
+    range_start_var: Any
+    range_end_var: Any
+    status_var: Any
 
-class YoutubeMidiApp:
+    studio_position_var: Any
+    studio_current_time_var: Any
+    studio_total_time_var: Any
+    studio_status_var: Any
+    studio_loaded_path: Any
+    studio_events: list
+    studio_event_times: list
+    studio_event_index: int
+    studio_total_duration: float
+    studio_position: float
+    studio_started_at: float
+    studio_state: str
+    studio_output: Any
+    studio_after_id: Any
+    studio_updating_slider: bool
+    editor_source_path: Any
+    editor_notes: list
+    editor_suspicious_reasons: dict
+
+    notebook: ttk.Notebook | None
+    main_tab: ttk.Frame | None
+    playback_tab: ttk.Frame | None
+    cleanup_tab: ttk.Frame | None
+    studio_tab: ttk.Frame | None
+    log: tk.Text | None
+    convert_button: ttk.Button | None
+    local_audio_button: ttk.Button | None
+    stop_button: ttk.Button | None
+    play_button: ttk.Button | None
+    midi_source_combo: ttk.Combobox | None
+    cached_combo: ttk.Combobox | None
+    studio_seek: ttk.Scale | None
+    studio_play_button: ttk.Button | None
+    studio_pause_button: ttk.Button | None
+    studio_stop_button: ttk.Button | None
+    editor_tree: ttk.Treeview | None
+    studio_canvas: tk.Canvas | None
+
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube MIDI Keyboard")
@@ -74,79 +120,7 @@ class YoutubeMidiApp:
         self.root.minsize(660, 480)
         self.root.attributes("-topmost", True)
 
-        self.queue = queue.Queue()
-        self.results = None
-        self.converting = False
-        self.convert_cancel_token = None
-        self.playing = False
-        self.stop_event = threading.Event()
-        self.stop_hotkey = None
-
-        self.url_var = tk.StringVar()
-        self.always_top_var = tk.BooleanVar(value=True)
-        self.midi_choice_var = tk.StringVar(value="accompaniment_midi")
-        self.midi_source_var = tk.StringVar()
-        self.available_midi_sources = {}
-        self.convert_vocals_midi_var = tk.BooleanVar(value=False)
-        self.selected_midi_var = tk.StringVar()
-        self.cached_choice_var = tk.StringVar()
-        self.cached_outputs = []
-        self.demucs_device_var = tk.StringVar(value=default_demucs_device() or "auto")
-        self.speed_var = tk.DoubleVar(value=1.0)
-        self.countdown_var = tk.IntVar(value=3)
-        self.transpose_var = tk.IntVar(value=0)
-        self.chord_delay_var = tk.IntVar(value=18)
-        self.min_hold_var = tk.IntVar(value=75)
-        self.min_note_duration_var = tk.IntVar(value=35)
-        self.velocity_threshold_var = tk.IntVar(value=12)
-        self.max_simultaneous_var = tk.IntVar(value=0)
-        self.octave_fit_var = tk.StringVar(value="smart")
-        self.melody_only_var = tk.BooleanVar(value=False)
-        self.melody_max_notes_var = tk.IntVar(value=1)
-        self.melody_window_var = tk.IntVar(value=80)
-        self.optimizer_mode_var = tk.StringVar(value="Rule")
-        self.original_key_var = tk.StringVar(value="Auto Detect")
-        self.target_key_var = tk.StringVar(value="Original")
-        self.detected_key_var = tk.StringVar(value="Detected Key: --")
-        self.key_transpose_status_var = tk.StringVar(value="Transpose: 0 semitones")
-        self.range_start_var = tk.DoubleVar(value=0.0)
-        self.range_end_var = tk.DoubleVar(value=30.0)
-        self.status_var = tk.StringVar(value="Ready")
-        self.studio_position_var = tk.DoubleVar(value=0.0)
-        self.studio_current_time_var = tk.StringVar(value="00:00.000")
-        self.studio_total_time_var = tk.StringVar(value="00:00.000")
-        self.studio_status_var = tk.StringVar(value="No MIDI loaded")
-        self.studio_loaded_path = None
-        self.studio_events = []
-        self.studio_event_times = []
-        self.studio_event_index = 0
-        self.studio_total_duration = 0.0
-        self.studio_position = 0.0
-        self.studio_started_at = 0.0
-        self.studio_state = "stopped"
-        self.studio_output = None
-        self.studio_after_id = None
-        self.studio_updating_slider = False
-        self.editor_source_path = None
-        self.editor_notes = []
-        self.editor_suspicious_reasons = {}
-
-        # UI widgets that are initialized in build_ui()
-        self.notebook: ttk.Notebook | None = None
-        self.main_tab: ttk.Frame | None = None
-        self.studio_tab: ttk.Frame | None = None
-        self.log: tk.Text | None = None
-        self.convert_button: ttk.Button | None = None
-        self.local_audio_button: ttk.Button | None = None
-        self.stop_button: ttk.Button | None = None
-        self.play_button: ttk.Button | None = None
-        self.midi_source_combo: ttk.Combobox | None = None
-        self.cached_combo: ttk.Combobox | None = None
-        self.studio_seek: ttk.Scale | None = None
-        self.studio_play_button: ttk.Button | None = None
-        self.studio_pause_button: ttk.Button | None = None
-        self.studio_stop_button: ttk.Button | None = None
-        self.editor_tree: ttk.Treeview | None = None
+        initialize_app_state(self)
 
         self.build_ui()
         self.refresh_converted_outputs()
@@ -155,740 +129,16 @@ class YoutubeMidiApp:
         self.poll_queue()
 
     def build_ui(self):
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-
-        notebook = ttk.Notebook(self.root)
-        notebook.grid(row=0, column=0, sticky="nsew")
-        main_tab = ttk.Frame(notebook)
-        studio_tab = ttk.Frame(notebook)
-        notebook.add(main_tab, text="Converter")
-        notebook.add(studio_tab, text="MIDI Studio")
-        notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
-        self.notebook = notebook
-        self.main_tab = main_tab
-        self.studio_tab = studio_tab
-
-        assert self.main_tab is not None
-        self.main_tab.columnconfigure(0, weight=1)
-        self.main_tab.rowconfigure(7, weight=1)
-
-        build_converter_tab(self)
-        self.build_midi_studio_ui()
-
-        assert self.log is not None
-        assert self.convert_button is not None
-        assert self.local_audio_button is not None
-        assert self.stop_button is not None
-        assert self.play_button is not None
-        assert self.midi_source_combo is not None
-        assert self.cached_combo is not None
-        assert self.studio_seek is not None
-        assert self.studio_play_button is not None
-        assert self.studio_pause_button is not None
-        assert self.studio_stop_button is not None
-        assert self.editor_tree is not None
-
-
-    def build_midi_studio_ui(self):
-        build_midi_studio_tab_ui(self)
-
-    def open_selected_midi_in_editor(self):
-        midi_path = self.get_selected_midi()
-        if not midi_path:
-            return
-        try:
-            self.editor_notes = load_editor_notes(midi_path)
-        except Exception as exc:
-            messagebox.showerror("MIDI Editor", f"Could not read MIDI:\n{exc}")
-            return
-
-        self.editor_source_path = midi_path
-        self.refresh_editor_tree()
-        self.studio_status_var.set(f"Editor: {len(self.editor_notes)} notes")
-
-    def refresh_editor_tree(self):
-        if self.editor_tree is None:
-            return
-
-        self.editor_suspicious_reasons = find_suspicious_notes(self.editor_notes)
-        children = self.editor_tree.get_children()
-        if children:
-            self.editor_tree.delete(*children)
-        for index, note in enumerate(self.editor_notes):
-            reason = self.editor_suspicious_reasons.get(index, "")
-            tags = ("suspicious",) if reason else ()
-            self.editor_tree.insert(
-                "",
-                "end",
-                iid=str(index),
-                values=(
-                    int(round(note.start * 1000)),
-                    int(round(note.duration_ms)),
-                    note.note,
-                    midi_note_name(note.note),
-                    note.velocity,
-                    reason,
-                ),
-                tags=tags,
-            )
-
-    def selected_editor_indices(self):
-        if self.editor_tree is None:
-            return set()
-
-        return {int(item_id) for item_id in self.editor_tree.selection()}
-
-    def delete_selected_editor_notes(self):
-        selected = self.selected_editor_indices()
-        if not selected:
-            messagebox.showwarning("MIDI Editor", "Select one or more notes first.")
-            return
-        self.editor_notes = [
-            note for index, note in enumerate(self.editor_notes) if index not in selected
-        ]
-        self.refresh_editor_tree()
-
-    def delete_same_pitch_editor_notes(self):
-        selected = self.selected_editor_indices()
-        if not selected:
-            messagebox.showwarning("MIDI Editor", "Select a pitch first.")
-            return
-        pitches = {self.editor_notes[index].note for index in selected}
-        self.editor_notes = [
-            note for note in self.editor_notes if note.note not in pitches
-        ]
-        self.refresh_editor_tree()
-
-    def delete_suspicious_editor_notes(self):
-        suspicious = set(find_suspicious_notes(self.editor_notes))
-        if not suspicious:
-            messagebox.showinfo("MIDI Editor", "No suspicious notes were found.")
-            return
-        self.editor_notes = [
-            note
-            for index, note in enumerate(self.editor_notes)
-            if index not in suspicious
-        ]
-        self.refresh_editor_tree()
-
-    def save_editor_midi(self):
-        if self.editor_source_path is None:
-            messagebox.showwarning("MIDI Editor", "Open the selected MIDI first.")
-            return
-
-        output_path = self.editor_source_path.parent / EDITED_37KEY_MIDI_NAME
-        if output_path.resolve() == self.editor_source_path.resolve():
-            messagebox.showerror(
-                "MIDI Editor",
-                "The selected MIDI is already edited_37key.mid. Open its original source "
-                "before saving so it is not overwritten.",
-            )
-            return
-        try:
-            save_edited_midi(self.editor_notes, output_path)
-        except Exception as exc:
-            messagebox.showerror("MIDI Editor", f"Could not save MIDI:\n{exc}")
-            return
-
-        self.stop_studio_midi()
-        self.studio_loaded_path = None
-        if self.results:
-            self.update_selected_midi()
-        else:
-            self.configure_midi_sources_from_path(output_path)
-        self.studio_status_var.set("Edited MIDI saved")
-        self.log_message(f"Edited 37-Key MIDI: {output_path}")
+        build_application_ui(self)
 
     def apply_topmost(self):
         self.root.attributes("-topmost", self.always_top_var.get())
-
-    @staticmethod
-    def format_studio_time(seconds):
-        milliseconds = max(0, int(round(float(seconds) * 1000)))
-        minutes, remainder = divmod(milliseconds, 60000)
-        whole_seconds, milliseconds = divmod(remainder, 1000)
-        return f"{minutes:02d}:{whole_seconds:02d}.{milliseconds:03d}"
-
-    def on_notebook_tab_changed(self, event=None):
-        assert self.notebook is not None
-        assert self.studio_tab is not None
-        if self.notebook.select() == str(self.studio_tab):
-            self.load_studio_midi()
-
-    def load_studio_midi(self, force=False):
-        value = self.selected_midi_var.get().strip()
-        if not value:
-            self.studio_status_var.set("No MIDI selected")
-            return False
-
-        midi_path = Path(value)
-        if not midi_path.exists():
-            self.studio_status_var.set("MIDI not found")
-            return False
-        if not force and midi_path == self.studio_loaded_path:
-            return True
-
-        self.stop_studio_midi()
-        try:
-            midi = mido.MidiFile(midi_path)
-            absolute_time = 0.0
-            events = []
-            for message in midi:
-                absolute_time += float(message.time)
-                if not message.is_meta:
-                    events.append((absolute_time, message.copy(time=0)))
-        except Exception as exc:
-            self.studio_status_var.set("Load failed")
-            messagebox.showerror("MIDI Studio", f"Could not load MIDI:\n{exc}")
-            return False
-
-        self.studio_loaded_path = midi_path
-        self.studio_events = events
-        self.studio_event_times = [timestamp for timestamp, _ in events]
-        self.studio_total_duration = max(float(midi.length), absolute_time, 0.0)
-        self.studio_event_index = 0
-        self.studio_position = 0.0
-        assert self.studio_seek is not None
-        self.studio_seek.configure(to=max(self.studio_total_duration, 0.001))
-        self.update_studio_position(0.0)
-        self.studio_total_time_var.set(
-            self.format_studio_time(self.studio_total_duration)
-        )
-        self.studio_status_var.set("Ready")
-        return True
-
-    def update_studio_position(self, position):
-        self.studio_position = max(
-            0.0, min(float(position), self.studio_total_duration)
-        )
-        self.studio_updating_slider = True
-        self.studio_position_var.set(self.studio_position)
-        self.studio_updating_slider = False
-        self.studio_current_time_var.set(
-            self.format_studio_time(self.studio_position)
-        )
-
-    def on_studio_seek(self, value):
-        if self.studio_updating_slider or self.studio_loaded_path is None:
-            return
-
-        position = max(0.0, min(float(value), self.studio_total_duration))
-        if self.studio_state in ("playing", "paused"):
-            self.send_studio_all_notes_off()
-        self.studio_event_index = bisect.bisect_left(
-            self.studio_event_times, position
-        )
-        self.update_studio_position(position)
-        if self.studio_state == "playing":
-            self.studio_started_at = time.perf_counter() - position
-
-    def open_studio_output(self):
-        if self.studio_output is not None:
-            return True
-        try:
-            self.studio_output = mido.open_output()  # type: ignore[attr-defined]
-        except Exception as exc:
-            self.studio_status_var.set("No MIDI output")
-            messagebox.showerror(
-                "MIDI Studio",
-                "Could not open a MIDI output port. Install the project requirements "
-                f"and make sure a MIDI synthesizer is available.\n\n{exc}",
-            )
-            return False
-        return True
-
-    def play_studio_midi(self):
-        if not self.load_studio_midi():
-            return
-        if not self.studio_events or self.studio_total_duration <= 0:
-            messagebox.showwarning("MIDI Studio", "This MIDI has no playable events.")
-            return
-        if not self.open_studio_output():
-            return
-
-        if self.studio_position >= self.studio_total_duration:
-            self.studio_event_index = 0
-            self.update_studio_position(0.0)
-
-        self.studio_state = "playing"
-        self.studio_started_at = time.perf_counter() - self.studio_position
-        assert self.studio_play_button is not None
-        self.studio_play_button.configure(state="disabled")
-        assert self.studio_pause_button is not None
-        self.studio_pause_button.configure(state="normal")
-        assert self.studio_stop_button is not None
-        self.studio_stop_button.configure(state="normal")
-        self.studio_status_var.set("Playing")
-        self.studio_tick()
-
-    def pause_studio_midi(self):
-        if self.studio_state != "playing":
-            return
-
-        position = min(
-            self.studio_total_duration,
-                        time.perf_counter() - self.studio_started_at,
-        )
-        self.update_studio_position(position)
-        self.studio_state = "paused"
-        self.cancel_studio_tick()
-        self.send_studio_all_notes_off()
-        assert self.studio_play_button is not None
-        self.studio_play_button.configure(state="normal")
-        assert self.studio_pause_button is not None
-        self.studio_pause_button.configure(state="disabled")
-        assert self.studio_stop_button is not None
-        self.studio_stop_button.configure(state="normal")
-        self.studio_status_var.set("Paused")
-
-    def stop_studio_midi(self):
-        self.cancel_studio_tick()
-        self.send_studio_all_notes_off()
-        if self.studio_output is not None:
-            try:
-                self.studio_output.close()
-            except Exception:
-                pass
-            self.studio_output = None
-
-        self.studio_state = "stopped"
-        self.studio_event_index = 0
-        self.update_studio_position(0.0)
-        if self.studio_play_button:
-                        self.studio_play_button.configure(state="normal")
-        if self.studio_pause_button:
-                        self.studio_pause_button.configure(state="disabled")
-        if self.studio_stop_button:
-                        self.studio_stop_button.configure(state="disabled")
-        if self.studio_loaded_path is not None:
-                        self.studio_status_var.set("Stopped")
-
-    def send_studio_all_notes_off(self):
-        if self.studio_output is None:
-            return
-        try:
-            for channel in range(16):
-                self.studio_output.send(
-                    mido.Message("control_change", channel=channel, control=123, value=0)
-                )
-        except Exception:
-            pass
-
-    def cancel_studio_tick(self):
-        if self.studio_after_id is not None:
-            self.root.after_cancel(self.studio_after_id)
-            self.studio_after_id = None
-
-    def schedule_studio_tick(self):
-        self.cancel_studio_tick()
-        self.studio_after_id = self.root.after(50, self.studio_tick)
-
-    def studio_tick(self):
-        self.studio_after_id = None
-        if self.studio_state != "playing":
-            return
-
-        position = min(
-            self.studio_total_duration,
-            time.perf_counter() - self.studio_started_at,
-        )
-        try:
-            while (
-                self.studio_event_index < len(self.studio_events)
-                and self.studio_events[self.studio_event_index][0] <= position
-            ):
-                _, message = self.studio_events[self.studio_event_index]
-                if self.studio_output is not None:
-                    self.studio_output.send(message)
-                self.studio_event_index += 1
-        except Exception as exc:
-            self.stop_studio_midi()
-            self.studio_status_var.set("Playback failed")
-            messagebox.showerror("MIDI Studio", f"MIDI playback failed:\n{exc}")
-            return
-
-        self.update_studio_position(position)
-        if position >= self.studio_total_duration:
-            self.finish_studio_playback()
-        else:
-            self.schedule_studio_tick()
-
-    def finish_studio_playback(self):
-        self.cancel_studio_tick()
-        self.send_studio_all_notes_off()
-        if self.studio_output is not None:
-            try:
-                self.studio_output.close()
-            except Exception:
-                                pass
-            self.studio_output = None
-        self.studio_state = "stopped"
-        self.studio_event_index = len(self.studio_events)
-        self.update_studio_position(self.studio_total_duration)
-        assert self.studio_play_button is not None
-        self.studio_play_button.configure(state="normal")
-        assert self.studio_pause_button is not None
-        self.studio_pause_button.configure(state="disabled")
-        assert self.studio_stop_button is not None
-        self.studio_stop_button.configure(state="disabled")
-        self.studio_status_var.set("Finished")
 
     def on_close(self):
         self.stop_event.set()
         self.unregister_stop_hotkey()
         self.stop_studio_midi()
         self.root.destroy()
-
-    def log_message(self, message):
-        assert self.log is not None
-        self.log.configure(state="normal")
-        self.log.insert("end", message + "\n")
-        self.log.see("end")
-        self.log.configure(state="disabled")
-
-    def poll_queue(self):
-        while True:
-            try:
-                kind, payload = self.queue.get_nowait()
-            except queue.Empty:
-                break
-
-            if kind == "log":
-                self.log_message(payload)
-            elif kind == "status":
-                self.status_var.set(payload)
-            elif kind == "converted":
-                self.results = payload
-                self.converting = False
-                self.convert_cancel_token = None
-                self.update_selected_midi()
-                self.on_key_transpose_changed()
-                self.refresh_converted_outputs()
-                assert self.convert_button is not None
-                self.convert_button.configure(state="normal")
-                assert self.local_audio_button is not None
-                self.local_audio_button.configure(state="normal")
-                assert self.stop_button is not None
-                self.stop_button.configure(state="disabled")
-                self.status_var.set("Conversion finished")
-            elif kind == "convert_error":
-                self.converting = False
-                self.convert_cancel_token = None
-                assert self.convert_button is not None
-                self.convert_button.configure(state="normal")
-                assert self.local_audio_button is not None
-                self.local_audio_button.configure(state="normal")
-                assert self.stop_button is not None
-                self.stop_button.configure(state="disabled")
-                self.status_var.set("Conversion failed")
-                messagebox.showerror("Conversion failed", payload)
-            elif kind == "convert_cancelled":
-                self.converting = False
-                self.convert_cancel_token = None
-                assert self.convert_button is not None
-                self.convert_button.configure(state="normal")
-                assert self.local_audio_button is not None
-                self.local_audio_button.configure(state="normal")
-                assert self.stop_button is not None
-                self.stop_button.configure(state="disabled")
-                self.status_var.set("Conversion cancelled")
-                self.log_message("Conversion cancelled.")
-            elif kind == "play_done":
-                self.playing = False
-                self.unregister_stop_hotkey()
-                assert self.play_button is not None
-                self.play_button.configure(state="normal")
-                assert self.stop_button is not None
-                self.stop_button.configure(state="disabled")
-                self.root.deiconify()
-                self.apply_topmost()
-                self.status_var.set("Keyboard playback finished")
-            elif kind == "play_error":
-                self.playing = False
-                self.unregister_stop_hotkey()
-                assert self.play_button is not None
-                self.play_button.configure(state="normal")
-                assert self.stop_button is not None
-                self.stop_button.configure(state="disabled")
-                self.root.deiconify()
-                self.apply_topmost()
-                self.status_var.set("Keyboard playback failed")
-                messagebox.showerror("Keyboard playback failed", payload)
-            elif kind == "optimize_done":
-                if self.results:
-                    self.update_selected_midi()
-                else:
-                    self.configure_midi_sources_from_path(payload["final_midi"])
-                self.status_var.set("MIDI optimized")
-                self.log_message(f"AI optimized MIDI: {payload['ai_optimized_midi']}")
-                self.log_message(f"Pitch corrected MIDI: {payload['pitch_corrected_midi']}")
-                self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
-                self.log_message(f"Detected key: {payload['detected_key']}")
-            elif kind == "optimize_error":
-                self.status_var.set("MIDI optimization failed")
-                messagebox.showerror("MIDI optimization failed", payload)
-
-        self.root.after(100, self.poll_queue)
-
-    def start_convert(self):
-        url = self.url_var.get().strip()
-        if not url:
-            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
-            return
-
-        assert self.convert_button is not None
-        self.convert_button.configure(state="disabled")
-        assert self.local_audio_button is not None
-        self.local_audio_button.configure(state="disabled")
-        assert self.stop_button is not None
-        self.stop_button.configure(state="normal")
-        self.results = None
-        self.clear_midi_source_options()
-        self.converting = True
-        self.convert_cancel_token = CancellationToken()
-        self.status_var.set("Checking dependencies")
-        self.log_message("Starting conversion...")
-
-        thread = threading.Thread(target=self.convert_worker, args=(url,), daemon=True)
-        thread.start()
-
-    def start_local_audio_convert(self):
-        filename = filedialog.askopenfilename(
-            title="Open local audio file",
-            filetypes=[
-                ("Audio files", "*.mp3 *.wav *.m4a *.flac *.ogg *.webm *.aac"),
-                ("All files", "*.*"),
-                        ],
-        )
-        if not filename:
-                        return
-
-        assert self.convert_button is not None
-        self.convert_button.configure(state="disabled")
-        assert self.local_audio_button is not None
-        self.local_audio_button.configure(state="disabled")
-        assert self.stop_button is not None
-        self.stop_button.configure(state="normal")
-        self.results = None
-        self.clear_midi_source_options()
-        self.converting = True
-        self.convert_cancel_token = CancellationToken()
-        self.status_var.set("Checking dependencies")
-        self.log_message(f"Starting local audio conversion: {filename}")
-
-        thread = threading.Thread(
-                        target=self.local_audio_convert_worker, args=(filename,), daemon=True
-        )
-        thread.start()
-
-    def convert_worker(self, url):
-        try:
-            check_cli_dependencies()
-            self.queue.put(("status", "Downloading and converting"))
-            demucs_device = self.demucs_device_var.get()
-            if demucs_device == "auto":
-                demucs_device = None
-            results = youtube_to_midi(
-                url,
-                cancel_token=self.convert_cancel_token,
-                demucs_device=demucs_device,
-                convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
-            )
-
-            self.queue.put(("log", f"Output folder: {results['base_dir']}"))
-            if results.get("cached"):
-                self.queue.put(("log", "Loaded cached conversion."))
-            self.queue.put(("log", f"Original WAV: {results['wav_file']}"))
-            self.queue.put(("log", f"Vocals MIDI: {results.get('vocal_midi')}"))
-            self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
-            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
-            self.queue.put(
-                ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
-            )
-            self.queue.put(
-                (
-                    "log",
-                    f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}",
-                )
-            )
-            self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
-            self.queue.put(("log", f"Vocals detected key: {results.get('vocal_detected_key')}"))
-            self.queue.put(
-                (
-                    "log",
-                    f"Accompaniment Clean 37-Key MIDI: {results['accompaniment_clean_midi']}",
-                )
-            )
-            self.queue.put(
-                (
-                    "log",
-                    f"Accompaniment AI Optimized MIDI: {results['accompaniment_ai_optimized_midi']}",
-                )
-            )
-            self.queue.put(
-                (
-                    "log",
-                    "Accompaniment Pitch Corrected MIDI: "
-                    f"{results['accompaniment_pitch_corrected_midi']}",
-                )
-            )
-            self.queue.put(
-                ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
-            )
-            self.queue.put(
-                ("log", f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
-            )
-            self.queue.put(("converted", results))
-        except CancelledError:
-            self.queue.put(("convert_cancelled", None))
-        except Exception as exc:
-            self.queue.put(("convert_error", format_command_error(exc)))
-
-    def local_audio_convert_worker(self, filename):
-        try:
-            check_cli_dependencies()
-            self.queue.put(("status", "Converting local audio"))
-            demucs_device = self.demucs_device_var.get()
-            if demucs_device == "auto":
-                demucs_device = None
-            results = audio_file_to_midi(
-                filename,
-                cancel_token=self.convert_cancel_token,
-                demucs_device=demucs_device,
-                convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
-            )
-
-            self.queue.put(("log", f"Output folder: {results['base_dir']}"))
-            if results.get("cached"):
-                self.queue.put(("log", "Loaded cached conversion."))
-            self.queue.put(("log", f"Original WAV: {results['wav_file']}"))
-            self.queue.put(("log", f"Vocals MIDI: {results.get('vocal_midi')}"))
-            self.queue.put(("log", f"Accompaniment MIDI: {results['accompaniment_midi']}"))
-            self.queue.put(("log", f"Vocals Clean 37-Key MIDI: {results.get('vocal_clean_midi')}"))
-            self.queue.put(
-                ("log", f"Vocals AI Optimized MIDI: {results.get('vocal_ai_optimized_midi')}")
-            )
-            self.queue.put(
-                (
-                    "log",
-                    f"Vocals Pitch Corrected MIDI: {results.get('vocal_pitch_corrected_midi')}",
-                )
-            )
-            self.queue.put(("log", f"Vocals Final 37-Key MIDI: {results.get('vocal_final_midi')}"))
-            self.queue.put(("log", f"Vocals detected key: {results.get('vocal_detected_key')}"))
-            self.queue.put(
-                (
-                    "log",
-                    f"Accompaniment Clean 37-Key MIDI: {results['accompaniment_clean_midi']}",
-                )
-            )
-            self.queue.put(
-                (
-                    "log",
-                    f"Accompaniment AI Optimized MIDI: {results['accompaniment_ai_optimized_midi']}",
-                )
-            )
-            self.queue.put(
-                (
-                    "log",
-                    "Accompaniment Pitch Corrected MIDI: "
-                    f"{results['accompaniment_pitch_corrected_midi']}",
-                )
-            )
-            self.queue.put(
-                ("log", f"Accompaniment Final 37-Key MIDI: {results['accompaniment_final_midi']}")
-            )
-            self.queue.put(
-                ("log", f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
-            )
-            self.queue.put(("converted", results))
-        except CancelledError:
-            self.queue.put(("convert_cancelled", None))
-        except Exception as exc:
-                        self.queue.put(("convert_error", format_command_error(exc)))
-
-    def clear_midi_source_options(self):
-        self.available_midi_sources = {}
-        if self.midi_source_combo:
-                        self.midi_source_combo.configure(values=())
-        self.midi_source_var.set("")
-        self.selected_midi_var.set("")
-
-    def set_midi_source_options(self, sources):
-        available = {}
-        for label in MIDI_SOURCE_PRIORITY:
-                        value = sources.get(label)
-                        if not value:
-                            continue
-                        path = Path(value)
-                        if path.exists():
-                            available[label] = path
-
-        self.available_midi_sources = available
-        labels = tuple(available)
-        assert self.midi_source_combo is not None
-        self.midi_source_combo.configure(values=labels)
-        if not labels:
-                        self.midi_source_var.set("")
-                        self.selected_midi_var.set("")
-                        return
-
-        self.midi_source_var.set(labels[0])
-        self.on_midi_source_selected()
-
-    def collect_result_midi_sources(self):
-        if not self.results:
-            return {}
-
-        raw_key = self.midi_choice_var.get()
-        if not self.results.get(raw_key) and raw_key == "vocal_midi":
-            self.midi_choice_var.set("accompaniment_midi")
-            raw_key = "accompaniment_midi"
-        prefix = "vocal" if raw_key == "vocal_midi" else "accompaniment"
-        sources = {
-            "Final 37-Key MIDI": self.results.get(f"{prefix}_final_midi"),
-            "Pitch Corrected MIDI": self.results.get(
-                f"{prefix}_pitch_corrected_midi"
-            ),
-            "AI Optimized MIDI": self.results.get(f"{prefix}_ai_optimized_midi"),
-            "Clean 37-Key MIDI": self.results.get(f"{prefix}_clean_midi"),
-            "Raw MIDI": self.results.get(raw_key),
-        }
-        parent_source = next((value for value in sources.values() if value), None)
-        if parent_source:
-            parent_dir = Path(parent_source).parent
-            sources["Transposed MIDI"] = parent_dir / TRANSPOSED_MIDI_NAME
-            sources["Edited MIDI"] = parent_dir / EDITED_37KEY_MIDI_NAME
-        return sources
-
-    def configure_midi_sources_from_path(self, midi_path):
-        midi_path = Path(midi_path)
-        sources = {
-            label: midi_path.parent / filename
-            for label, filename in MIDI_SOURCE_FILENAMES.items()
-        }
-        known_label = next(
-            (
-                label
-                for label, filename in MIDI_SOURCE_FILENAMES.items()
-                if midi_path.name.lower() == filename.lower()
-            ),
-            None,
-        )
-        if known_label:
-            sources[known_label] = midi_path
-        else:
-            sources["Raw MIDI"] = midi_path
-        self.set_midi_source_options(sources)
-
-    def on_midi_source_selected(self, event=None):
-        midi_path = self.available_midi_sources.get(self.midi_source_var.get())
-        if midi_path:
-            self.selected_midi_var.set(str(midi_path))
-
-    def update_selected_midi(self):
-        self.set_midi_source_options(self.collect_result_midi_sources())
 
     def on_key_transpose_changed(self, event=None):
         target_key = self.target_key_var.get()
@@ -1042,262 +292,6 @@ class YoutubeMidiApp:
                     )
                     self.status_var.set("Converted folder loaded")
                 return
-
-    def get_selected_midi(self):
-                value = self.selected_midi_var.get().strip()
-                if not value:
-                    messagebox.showwarning("No MIDI selected", "Convert or open a MIDI file first.")
-                    return None
-
-                midi_path = Path(value)
-                if not midi_path.exists():
-                    messagebox.showerror("MIDI not found", str(midi_path))
-                    return None
-
-                return midi_path
-
-    def get_cleanup_settings(self):
-        try:
-            min_note_duration = int(self.min_note_duration_var.get())
-            velocity_threshold = int(self.velocity_threshold_var.get())
-            max_simultaneous_notes = int(self.max_simultaneous_var.get())
-            melody_max_notes = int(self.melody_max_notes_var.get())
-            melody_window = int(self.melody_window_var.get())
-            settings = {
-                "transpose": int(self.transpose_var.get()),
-                "min_note_duration": min_note_duration / 1000,
-                "velocity_threshold": velocity_threshold,
-                "max_simultaneous_notes": max_simultaneous_notes,
-                "out_of_range_mode": self.octave_fit_var.get(),
-                "melody_only": bool(self.melody_only_var.get()),
-                "melody_max_notes": melody_max_notes,
-                "melody_window": melody_window / 1000,
-            }
-        except (TypeError, ValueError):
-            messagebox.showerror("Invalid setting", "Cleanup settings must be numbers.")
-            return None
-
-        if (
-            min_note_duration < 0
-            or velocity_threshold < 0
-            or velocity_threshold > 127
-            or max_simultaneous_notes < 0
-            or melody_max_notes < 1
-            or melody_max_notes > 3
-            or melody_window <= 0
-        ):
-            messagebox.showerror("Invalid setting", "Cleanup settings are out of range.")
-            return None
-
-        return settings
-
-    def preview_selected_midi(self):
-        midi_path = self.get_selected_midi()
-        if not midi_path:
-            return
-
-        self.log_message(f"Preview: {midi_path}")
-        count = 0
-        cleanup_settings = self.get_cleanup_settings()
-        if cleanup_settings is None:
-            return
-
-        for timestamp, action, note, key in iter_note_events(midi_path, **cleanup_settings):
-            note_name = midi_note_name(note)
-            self.log_message(
-                f"{timestamp:8.3f}s  note {note:3d} {note_name:3s}  {action:4s}  key {key}"
-            )
-            count += 1
-            if count >= 80:
-                self.log_message("... preview stopped after 80 events")
-                break
-        if count == 0:
-            self.log_message("No mapped note events found in this MIDI file.")
-
-    def start_optimize_midi(self):
-        midi_path = self.get_selected_midi()
-        if not midi_path:
-            return
-
-        mode = self.optimizer_mode_var.get().strip().lower()
-        if mode == "none":
-            messagebox.showwarning("Optimizer disabled", "Choose Rule or OpenAI first.")
-            return
-
-        try:
-            options = {
-                "mode": mode,
-                "max_notes_per_window": max(1, min(int(self.melody_max_notes_var.get()), 3)),
-                "min_note_duration_ms": int(self.min_note_duration_var.get()),
-            }
-        except (TypeError, ValueError):
-            messagebox.showerror("Invalid setting", "Optimizer settings must be numbers.")
-            return
-
-        self.status_var.set("Optimizing MIDI")
-        self.log_message(f"Optimizing MIDI with {self.optimizer_mode_var.get()} mode: {midi_path}")
-        thread = threading.Thread(
-            target=self.optimize_worker,
-            args=(midi_path, options),
-            daemon=True,
-        )
-        thread.start()
-
-    def optimize_worker(self, midi_path, options):
-        try:
-            result = post_process_37key_midi(midi_path, options=options)
-            self.queue.put(("optimize_done", result))
-        except Exception as exc:
-            self.queue.put(("optimize_error", str(exc)))
-
-    def start_keyboard_playback(self):
-        self.start_playback()
-
-    def get_range_settings(self):
-        try:
-            start_sec = float(self.range_start_var.get())
-            end_sec = float(self.range_end_var.get())
-        except (TypeError, ValueError, tk.TclError):
-            messagebox.showerror("Invalid range", "Start and end seconds must be numbers.")
-            return None
-
-        if start_sec < 0 or end_sec <= start_sec:
-            messagebox.showerror(
-                "Invalid range",
-                "Start seconds must be 0 or greater, and end must be after start.",
-            )
-            return None
-        return start_sec, end_sec
-
-    def start_range_playback(self):
-        midi_range = self.get_range_settings()
-        if midi_range is not None:
-            self.start_playback(start_sec=midi_range[0], end_sec=midi_range[1])
-
-    def export_selected_range(self):
-        midi_path = self.get_selected_midi()
-        if not midi_path:
-            return
-        midi_range = self.get_range_settings()
-        if midi_range is None:
-            return
-
-        output_path = midi_path.parent / CHORUS_MIDI_NAME
-        try:
-            export_midi_range(midi_path, output_path, *midi_range)
-        except Exception as exc:
-            messagebox.showerror("Range export failed", str(exc))
-            return
-
-        self.status_var.set("MIDI range exported")
-        self.log_message(f"Exported MIDI range: {output_path}")
-
-    def start_playback(self, start_sec=None, end_sec=None):
-        midi_path = self.get_selected_midi()
-        if not midi_path or self.playing:
-            return
-
-        try:
-            speed = float(self.speed_var.get())
-            countdown = int(self.countdown_var.get())
-            chord_delay = int(self.chord_delay_var.get()) / 1000
-            min_hold = int(self.min_hold_var.get()) / 1000
-        except (TypeError, ValueError):
-            messagebox.showerror("Invalid setting", "Playback settings must be numbers.")
-            return
-
-        cleanup_settings = self.get_cleanup_settings()
-        if cleanup_settings is None:
-            return
-
-        if speed <= 0 or countdown < 1 or chord_delay < 0 or min_hold < 0:
-            messagebox.showerror("Invalid setting", "Playback settings are out of range.")
-            return
-
-        self.playing = True
-        self.stop_event.clear()
-        self.register_stop_hotkey()
-        assert self.play_button is not None
-        self.play_button.configure(state="disabled")
-        assert self.stop_button is not None
-        self.stop_button.configure(state="normal")
-        self.status_var.set(f"Hiding window. Focus the game within {countdown} seconds.")
-        if start_sec is None:
-            playback_label = "Keyboard playback"
-        else:
-            playback_label = f"Range playback ({start_sec:g}s to {end_sec:g}s)"
-        self.log_message(f"{playback_label} will start in {countdown} seconds. Press F8 to stop.")
-        self.root.withdraw()
-
-        thread = threading.Thread(
-            target=self.play_worker,
-            args=(
-                midi_path,
-                speed,
-                countdown,
-                chord_delay,
-                min_hold,
-                cleanup_settings,
-                start_sec,
-                end_sec,
-            ),
-            daemon=True,
-        )
-        thread.start()
-
-    def play_worker(
-        self,
-        midi_path,
-        speed,
-        countdown,
-        chord_delay,
-        min_hold,
-        cleanup_settings,
-        start_sec=None,
-        end_sec=None,
-    ):
-        try:
-            if self.stop_event.wait(countdown):
-                self.queue.put(("play_done", None))
-                return
-            play_midi_as_keyboard(
-                midi_path,
-                speed=speed,
-                stop_event=self.stop_event,
-                chord_delay=chord_delay,
-                min_hold=min_hold,
-                start_sec=start_sec,
-                end_sec=end_sec,
-                **cleanup_settings,
-            )
-            self.queue.put(("play_done", None))
-        except Exception as exc:
-            self.queue.put(("play_error", str(exc)))
-
-    def stop_keyboard_playback(self, event=None):
-        if self.playing:
-            self.stop_event.set()
-            self.status_var.set("Stopping keyboard playback")
-            self.log_message("Stop requested.")
-
-    def stop_current_task(self):
-        if self.converting and self.convert_cancel_token:
-            self.status_var.set("Cancelling conversion")
-            self.log_message("Cancelling conversion...")
-            self.convert_cancel_token.cancel()
-            return
-
-        self.stop_keyboard_playback()
-
-    def register_stop_hotkey(self):
-        self.unregister_stop_hotkey()
-        self.stop_hotkey = keyboard.add_hotkey("f8", self.stop_keyboard_playback)
-
-    def unregister_stop_hotkey(self):
-        if self.stop_hotkey is not None:
-            keyboard.remove_hotkey(self.stop_hotkey)
-            self.stop_hotkey = None
-
 
 def main():
     root = tk.Tk()

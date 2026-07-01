@@ -16,6 +16,8 @@ MINOR_SCALE = (0, 2, 3, 5, 7, 8, 10)
 OPTIMIZER_NONE = "none"
 OPTIMIZER_RULE = "rule"
 OPTIMIZER_OPENAI = "openai"
+OPTIMIZER_PIANO_COVER = "piano cover"
+PIANO_COVER_MIDI_NAME = "piano_cover_37key.mid"
 DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "mode": OPTIMIZER_RULE,
     "chunk_ms": 8000,
@@ -200,6 +202,183 @@ def optimize_notes_with_rules(notes, options=None):
     return validate_note_dicts(selected)
 
 
+def _normalize_optimizer_mode(mode):
+    return " ".join(str(mode or "").lower().replace("_", " ").replace("-", " ").split())
+
+
+def _onset_groups(notes, window_ms):
+    window_seconds = max(1, int(window_ms)) / 1000
+    groups = []
+    for note in sorted(notes, key=lambda item: (item.start, item.original_note)):
+        if not groups or note.start - groups[-1][0].start > window_seconds:
+            groups.append([note])
+        else:
+            groups[-1].append(note)
+    return groups
+
+
+def _octave_candidates(pitch, lowest, highest):
+    return [candidate for candidate in range(lowest, highest + 1) if candidate % 12 == pitch % 12]
+
+
+def _melody_pitch(pitch, lowest, highest, allow_octave_up=True):
+    candidates = _octave_candidates(pitch, lowest, highest)
+    if not candidates:
+        return None
+    if lowest <= pitch <= highest:
+        # Give a low melody one octave of separation from the left hand when possible.
+        if allow_octave_up and pitch < lowest + 24 and pitch + 12 <= highest:
+            return pitch + 12
+        return pitch
+    melody_floor = min(highest, lowest + 24)
+    return min(candidates, key=lambda candidate: (abs(candidate - melody_floor), -candidate))
+
+
+def _accompaniment_pitch(pitch, melody_pitch, lowest, highest, bass=False):
+    candidates = [
+        candidate
+        for candidate in _octave_candidates(pitch, lowest, highest)
+        if candidate <= melody_pitch - 3
+    ]
+    if not candidates:
+        return None
+    target = lowest + (7 if bass else 17)
+    return min(candidates, key=lambda candidate: (abs(candidate - target), candidate))
+
+
+def arrange_piano_cover_notes(notes, note_map=None, options=None):
+    """Reduce a transcription to a melody-first, three-note piano arrangement."""
+    options = options or {}
+    note_map = note_map or DEFAULT_NOTE_MAP
+    lowest, highest = min(note_map), max(note_map)
+    min_duration = max(0, int(options.get("min_note_duration_ms", 35))) / 1000
+    velocity_threshold = max(0, int(options.get("velocity_threshold", 12)))
+    window_ms = max(20, int(options.get("arrangement_window_ms", 60)))
+    max_notes = max(2, min(int(options.get("max_notes_per_window", 3)), 3))
+    repeat_seconds = max(0, int(options.get("bass_repeat_ms", 450))) / 1000
+    allow_octave_up = bool(options.get("melody_octave_up", True))
+
+    source = [
+        note for note in notes
+        if note.duration >= min_duration and note.velocity >= velocity_threshold
+    ]
+    groups = _onset_groups(source, window_ms)
+    arranged = []
+    active_melody = None
+    last_bass_pitch = None
+    last_bass_start = -float("inf")
+
+    for group_index, group in enumerate(groups):
+        group_start = min(note.start for note in group)
+        next_start = (
+            min(note.start for note in groups[group_index + 1])
+            if group_index + 1 < len(groups)
+            else None
+        )
+        top = max(group, key=lambda note: (note.original_note, note.duration, note.velocity))
+        active_remaining = active_melody.end - group_start if active_melody else 0
+        keep_sustained_melody = bool(
+            active_melody
+            and active_remaining > 0
+            and top.original_note <= active_melody.original_note
+            and top.duration < active_remaining
+        )
+
+        melody_source = None if keep_sustained_melody else top
+        if melody_source is not None:
+            pitch = _melody_pitch(
+                melody_source.original_note, lowest, highest, allow_octave_up=allow_octave_up
+            )
+            if pitch is None:
+                continue
+            if active_melody and active_melody.end > group_start:
+                active_melody.end = max(active_melody.start + 0.001, group_start)
+            active_melody = RuleNote(
+                start=melody_source.start,
+                end=melody_source.end,
+                original_note=melody_source.original_note,
+                note=pitch,
+                velocity=min(127, melody_source.velocity + 8),
+                octave_shift=pitch - melody_source.original_note,
+            )
+            arranged.append(active_melody)
+
+        if not active_melody or active_melody.end <= group_start:
+            continue
+        melody_pitch = active_melody.note
+        accompaniment = [note for note in group if note is not melody_source]
+        if not accompaniment:
+            continue
+
+        bass_source = min(
+            accompaniment,
+            key=lambda note: (note.original_note, -note.duration, -note.velocity),
+        )
+        bass_pitch = _accompaniment_pitch(
+            bass_source.original_note, melody_pitch, lowest, highest, bass=True
+        )
+        chosen = []
+        if (
+            bass_pitch is not None
+            and not (
+                bass_pitch == last_bass_pitch
+                and group_start - last_bass_start < repeat_seconds
+            )
+        ):
+            chosen.append((bass_source, bass_pitch))
+            last_bass_pitch, last_bass_start = bass_pitch, group_start
+
+        harmony_candidates = []
+        for note in accompaniment:
+            if note is bass_source:
+                continue
+            pitch = _accompaniment_pitch(
+                note.original_note, melody_pitch, lowest, highest, bass=False
+            )
+            if pitch is None or pitch == bass_pitch or pitch == melody_pitch:
+                continue
+            score = note.duration_ms * 0.22 + note.velocity - abs((melody_pitch - pitch) - 7)
+            harmony_candidates.append((score, note, pitch))
+        harmony_candidates.sort(key=lambda item: item[0], reverse=True)
+        for _, note, pitch in harmony_candidates:
+            if len(chosen) >= max_notes - 1:
+                break
+            if pitch not in {chosen_pitch for _, chosen_pitch in chosen}:
+                chosen.append((note, pitch))
+
+        for note, pitch in chosen:
+            # Accompaniment yields at the next onset; the sustained melody does not.
+            end = min(note.end, active_melody.end)
+            if next_start is not None:
+                end = min(end, next_start)
+            if end <= group_start:
+                continue
+            arranged.append(
+                RuleNote(
+                    start=group_start,
+                    end=end,
+                    original_note=note.original_note,
+                    note=pitch,
+                    velocity=max(1, min(note.velocity, active_melody.velocity - 8)),
+                    octave_shift=pitch - note.original_note,
+                )
+            )
+
+    return sorted(arranged, key=lambda note: (note.start, -note.note))
+
+
+def arrange_piano_cover_midi(input_midi, output_midi=None, options=None):
+    input_midi = Path(input_midi)
+    output_midi = (
+        Path(output_midi)
+        if output_midi
+        else input_midi.with_name(PIANO_COVER_MIDI_NAME)
+    )
+    notes = arrange_piano_cover_notes(read_midi_notes(input_midi), options=options)
+    write_clean_midi(notes, output_midi, quantize_ms=(options or {}).get("final_quantize_ms", 10))
+    return output_midi
+
+
 def extract_json_from_response(payload):
     if isinstance(payload, dict):
         if isinstance(payload.get("output_text"), str):
@@ -266,7 +445,7 @@ def optimize_notes_with_openai(notes, options):
 
 
 def optimize_chunk(notes, options):
-    mode = (options.get("mode") or OPTIMIZER_RULE).lower()
+    mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
     if mode == OPTIMIZER_OPENAI:
         try:
             return validate_note_dicts(optimize_notes_with_openai(notes, options))
@@ -467,6 +646,23 @@ def smooth_37key_midi(input_midi, output_midi=None, options=None):
 
 def post_process_37key_midi(clean_midi, options=None):
     clean_midi = Path(clean_midi)
+    options = options or {}
+    if _normalize_optimizer_mode(options.get("mode")) == OPTIMIZER_PIANO_COVER:
+        piano_cover_midi = clean_midi.with_name(PIANO_COVER_MIDI_NAME)
+        final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
+        arrange_piano_cover_midi(clean_midi, output_midi=piano_cover_midi, options=options)
+        key_name = detect_key_for_midi(piano_cover_midi)
+        smooth_37key_midi(piano_cover_midi, output_midi=final_midi, options=options)
+        return {
+            "clean_midi": clean_midi,
+            "piano_cover_midi": piano_cover_midi,
+            "ai_optimized_midi": None,
+            "pitch_corrected_midi": None,
+            "final_midi": final_midi,
+            "detected_key": key_name,
+            "arrangement_mode": "Piano Cover",
+        }
+
     ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
     pitch_corrected_midi = clean_midi.with_name(PITCH_CORRECTED_MIDI_NAME)
     final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
