@@ -1,6 +1,6 @@
 from tkinter import ttk
 
-from ui_settings_panel import build_playback_settings_panel
+from ui.panels.settings_panel import build_playback_settings_panel
 
 
 def build_convert_panel(app, parent, start_row=0):

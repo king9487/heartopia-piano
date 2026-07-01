@@ -1,11 +1,11 @@
 from tkinter import ttk
 
-from ui_cleanup_panel import build_cleanup_panel
-from ui_convert_panel import build_convert_panel
-from ui_log_panel import build_log_panel
-from ui_midi_panel import build_midi_panel
-from ui_settings_panel import build_settings_panel
-from ui_studio_panel import build_studio_panel
+from ui.panels.cleanup_panel import build_cleanup_panel
+from ui.panels.convert_panel import build_convert_panel
+from ui.panels.log_panel import build_log_panel
+from ui.panels.midi_panel import build_midi_panel
+from ui.panels.settings_panel import build_settings_panel
+from ui.panels.studio_panel import build_studio_panel
 
 
 def build_main_panel(app, parent):

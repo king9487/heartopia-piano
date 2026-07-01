@@ -12,16 +12,16 @@ from transpose import (
     TRANSPOSED_MIDI_NAME,
     transpose_midi_to_key,
 )
-from ui_convert_actions import UiConvertActionsMixin
-from ui_editor_actions import UiEditorActionsMixin
-from ui_log_helpers import UiLogHelpersMixin
-from ui_main_panel import build_application_ui
-from ui_optimizer_actions import UiOptimizerActionsMixin
-from ui_playback_actions import UiPlaybackActionsMixin
-from ui_queue_handlers import UiQueueHandlersMixin
-from ui_selection import MidiSelectionMixin
-from ui_state import initialize_app_state
-from ui_studio_actions import UiStudioActionsMixin
+from ui.actions.convert_actions import UiConvertActionsMixin
+from ui.actions.editor_actions import UiEditorActionsMixin
+from ui.actions.optimizer_actions import UiOptimizerActionsMixin
+from ui.actions.playback_actions import UiPlaybackActionsMixin
+from ui.actions.studio_actions import UiStudioActionsMixin
+from ui.helpers.log_helpers import UiLogHelpersMixin
+from ui.helpers.queue_handlers import UiQueueHandlersMixin
+from ui.helpers.selection import MidiSelectionMixin
+from ui.helpers.state import initialize_app_state
+from ui.panels.main_panel import build_application_ui
 
 
 class YoutubeMidiApp(

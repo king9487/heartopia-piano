@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ui.midi_editor_panel import build_midi_editor_panel
+from ui.panels.midi_editor_panel import build_midi_editor_panel
 
 
 def build_studio_panel(app, parent):
