@@ -3,3 +3,8 @@ venv/
 output/
 __pycache__/
 *.pyc
+
+# Debug reports
+*_AUDIT_REPORT.md
+*_REPORT.md
+analysis_report.json
