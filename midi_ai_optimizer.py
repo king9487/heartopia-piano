@@ -1,9 +1,11 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from urllib import request
 
 from midi_rule_engine import RuleNote, read_midi_notes, write_clean_midi
+from midi_piano_arranger import PIANO_ARRANGED_MIDI_NAME, arrange_piano_midi
 from midi_to_keyboard import DEFAULT_NOTE_MAP
 
 
@@ -23,7 +25,7 @@ ARRANGEMENT_MELODY_ONLY = "melody_only"
 ARRANGEMENT_PIANO_COVER = "piano_cover"
 DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "mode": OPTIMIZER_RULE,
-    "arrangement_style": ARRANGEMENT_ORIGINAL,
+    "arrangement_style": ARRANGEMENT_PIANO_COVER,
     "chunk_ms": 8000,
     "window_ms": 50,
     "max_notes_per_window": 2,
@@ -730,7 +732,7 @@ def smooth_37key_midi(input_midi, output_midi=None, options=None):
 
 def post_process_37key_midi(clean_midi, options=None):
     clean_midi = Path(clean_midi)
-    options = options or {}
+    options = {**DEFAULT_AI_OPTIMIZER_OPTIONS, **(options or {})}
     mode = _normalize_optimizer_mode(options.get("mode"))
     arrangement_style = _normalize_arrangement_style(
         options.get("arrangement_style")
@@ -739,51 +741,46 @@ def post_process_37key_midi(clean_midi, options=None):
     if mode == OPTIMIZER_PIANO_COVER:
         arrangement_style = ARRANGEMENT_PIANO_COVER
 
+    arrangement_input = clean_midi
+    arrangement_midi = None
+    arrangement_report = None
+    legacy_piano_cover_midi = None
+    arrangement_name = "Original"
     if arrangement_style == ARRANGEMENT_PIANO_COVER:
-        piano_cover_midi = clean_midi.with_name(PIANO_COVER_MIDI_NAME)
-        final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
-        arrange_piano_cover_midi(clean_midi, output_midi=piano_cover_midi, options=options)
-        key_name = detect_key_for_midi(piano_cover_midi)
-        smooth_37key_midi(piano_cover_midi, output_midi=final_midi, options=options)
-        return {
-            "clean_midi": clean_midi,
-            "piano_cover_midi": piano_cover_midi,
-            "ai_optimized_midi": None,
-            "pitch_corrected_midi": None,
-            "final_midi": final_midi,
-            "detected_key": key_name,
-            "arrangement_mode": "Piano Cover",
-        }
-
-    if arrangement_style == ARRANGEMENT_MELODY_ONLY:
-        melody_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
-        final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
-        arrange_melody_only_midi(clean_midi, melody_midi, options=options)
-        key_name = detect_key_for_midi(melody_midi)
-        smooth_37key_midi(melody_midi, output_midi=final_midi, options=options)
-        return {
-            "clean_midi": clean_midi,
-            "piano_cover_midi": None,
-            "ai_optimized_midi": melody_midi,
-            "pitch_corrected_midi": None,
-            "final_midi": final_midi,
-            "detected_key": key_name,
-            "arrangement_mode": "Melody Only",
-        }
+        arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
+        arranged_result = arrange_piano_midi(
+            clean_midi, output_midi=arrangement_midi, options=options
+        )
+        arrangement_report = arranged_result["report_path"]
+        legacy_piano_cover_midi = clean_midi.with_name(PIANO_COVER_MIDI_NAME)
+        shutil.copyfile(arrangement_midi, legacy_piano_cover_midi)
+        arrangement_input = arrangement_midi
+        arrangement_name = "Piano Cover"
+    elif arrangement_style == ARRANGEMENT_MELODY_ONLY:
+        arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
+        arrange_melody_only_midi(clean_midi, arrangement_midi, options=options)
+        legacy_piano_cover_midi = clean_midi.with_name(PIANO_COVER_MIDI_NAME)
+        shutil.copyfile(arrangement_midi, legacy_piano_cover_midi)
+        arrangement_input = arrangement_midi
+        arrangement_name = "Melody Only"
 
     ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
     pitch_corrected_midi = clean_midi.with_name(PITCH_CORRECTED_MIDI_NAME)
     final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
 
-    optimize_37key_midi(clean_midi, output_midi=ai_midi, options=options)
+    optimize_37key_midi(arrangement_input, output_midi=ai_midi, options=options)
     _, key_info = pitch_correct_37key_midi(
         ai_midi, output_midi=pitch_corrected_midi, options=options
     )
     smooth_37key_midi(pitch_corrected_midi, output_midi=final_midi, options=options)
     return {
         "clean_midi": clean_midi,
+        "piano_arranged_midi": arrangement_midi,
+        "piano_cover_midi": legacy_piano_cover_midi,
+        "arrangement_report": arrangement_report,
         "ai_optimized_midi": ai_midi,
         "pitch_corrected_midi": pitch_corrected_midi,
         "final_midi": final_midi,
         "detected_key": key_info["name"],
+        "arrangement_mode": arrangement_name,
     }

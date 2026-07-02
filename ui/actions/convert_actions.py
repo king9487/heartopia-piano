@@ -146,4 +146,8 @@ class UiConvertActionsMixin:
         self.queue.put(
             ("log", f"Accompaniment detected key: {results.get('accompaniment_detected_key')}")
         )
+        if results.get("accompaniment_report_path"):
+            self.queue.put(
+                ("log", f"MIDI analysis report: {results['accompaniment_report_path']}")
+            )
         self.queue.put(("converted", results))

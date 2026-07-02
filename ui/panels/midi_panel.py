@@ -53,4 +53,41 @@ def build_midi_panel(app, parent, row):
         row=2, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     app.midi_source_combo.bind("<<ComboboxSelected>>", app.on_midi_source_selected)
-    return row + 2
+
+    compare = ttk.LabelFrame(parent, text="A/B Compare", padding=10)
+    compare.grid(row=row + 2, column=0, sticky="ew", padx=12, pady=(0, 8))
+    compare.columnconfigure(1, weight=1)
+    compare.columnconfigure(4, weight=1)
+    ttk.Label(compare, text="A source").grid(row=0, column=0, sticky="w")
+    app.compare_a_combo = ttk.Combobox(
+        compare,
+        textvariable=app.compare_a_source_var,
+        state="readonly",
+        width=24,
+    )
+    app.compare_a_combo.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+    ttk.Button(
+        compare, text="Play A", command=lambda: app.play_compare_midi("A")
+    ).grid(row=0, column=2, sticky="w")
+    ttk.Button(
+        compare, text="Set A as Current", command=lambda: app.set_compare_as_current("A")
+    ).grid(row=0, column=3, sticky="w", padx=(8, 16))
+
+    ttk.Label(compare, text="B source").grid(row=0, column=4, sticky="w")
+    app.compare_b_combo = ttk.Combobox(
+        compare,
+        textvariable=app.compare_b_source_var,
+        state="readonly",
+        width=24,
+    )
+    app.compare_b_combo.grid(row=0, column=5, sticky="ew", padx=(8, 8))
+    ttk.Button(
+        compare, text="Play B", command=lambda: app.play_compare_midi("B")
+    ).grid(row=0, column=6, sticky="w")
+    ttk.Button(
+        compare, text="Set B as Current", command=lambda: app.set_compare_as_current("B")
+    ).grid(row=0, column=7, sticky="w", padx=(8, 8))
+    ttk.Button(compare, text="Stop", command=app.stop_keyboard_playback).grid(
+        row=0, column=8, sticky="w"
+    )
+    return row + 3

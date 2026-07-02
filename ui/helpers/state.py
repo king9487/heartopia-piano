@@ -2,6 +2,7 @@ import queue
 import threading
 import tkinter as tk
 
+from midi_analysis import ANALYSIS_FIELDS
 from tools import default_demucs_device
 
 
@@ -20,6 +21,9 @@ def initialize_app_state(app):
     app.midi_choice_var = tk.StringVar(value="accompaniment_midi")
     app.midi_source_var = tk.StringVar()
     app.available_midi_sources = {}
+    app.compare_a_source_var = tk.StringVar()
+    app.compare_b_source_var = tk.StringVar()
+    app.available_compare_sources = {}
     app.convert_vocals_midi_var = tk.BooleanVar(value=False)
     app.selected_midi_var = tk.StringVar()
     app.cached_choice_var = tk.StringVar()
@@ -46,6 +50,9 @@ def initialize_app_state(app):
     app.range_start_var = tk.DoubleVar(value=0.0)
     app.range_end_var = tk.DoubleVar(value=30.0)
     app.status_var = tk.StringVar(value="Ready")
+    app.analysis_vars = {
+        field: tk.StringVar(value="--") for field in ANALYSIS_FIELDS
+    }
     app.studio_position_var = tk.DoubleVar(value=0.0)
     app.studio_current_time_var = tk.StringVar(value="00:00.000")
     app.studio_total_time_var = tk.StringVar(value="00:00.000")
@@ -78,6 +85,8 @@ def initialize_app_state(app):
     app.stop_button = None
     app.play_button = None
     app.midi_source_combo = None
+    app.compare_a_combo = None
+    app.compare_b_combo = None
     app.cached_combo = None
     app.studio_seek = None
     app.studio_play_button = None

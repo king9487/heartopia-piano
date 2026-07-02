@@ -95,6 +95,10 @@ class UiQueueHandlersMixin:
         else:
             self.configure_midi_sources_from_path(payload["final_midi"])
         self.set_status("MIDI optimized")
+        if payload.get("piano_arranged_midi"):
+            self.log_message(f"Piano Arranged MIDI: {payload['piano_arranged_midi']}")
+        if payload.get("arrangement_report"):
+            self.log_message(f"Arrangement report: {payload['arrangement_report']}")
         if payload.get("piano_cover_midi"):
             self.log_message(f"Piano Cover MIDI: {payload['piano_cover_midi']}")
         if payload.get("ai_optimized_midi"):

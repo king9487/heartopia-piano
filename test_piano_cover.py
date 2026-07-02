@@ -1,7 +1,9 @@
 import unittest
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from converter import ensure_full_post_processing
 from midi_ai_optimizer import arrange_piano_cover_notes, post_process_37key_midi
 from midi_rule_engine import RuleNote, read_midi_notes, write_clean_midi
 
@@ -86,6 +88,42 @@ class PianoCoverArrangementTests(unittest.TestCase):
             self.assertEqual(result["arrangement_mode"], "Melody Only")
             self.assertEqual(len([item for item in output_notes if item.start < 0.01]), 1)
             self.assertTrue(all(36 <= item.note <= 72 for item in output_notes))
+
+    def test_default_pipeline_keeps_every_generated_stage(self):
+        source = [note(0, 0.5, 48), note(0, 0.5, 64), note(0, 0.5, 72)]
+        with TemporaryDirectory() as directory:
+            input_midi = Path(directory) / "raw.mid"
+            write_clean_midi(source, input_midi)
+            result = ensure_full_post_processing(input_midi)
+            for key in (
+                "clean_midi",
+                "piano_arranged_midi",
+                "piano_cover_midi",
+                "ai_optimized_midi",
+                "pitch_corrected_midi",
+                "final_midi",
+            ):
+                self.assertTrue(result[key].exists(), key)
+            self.assertTrue(result["arrangement_report"].exists())
+            self.assertEqual(result["report_path"].name, "report.json")
+            report = json.loads(result["report_path"].read_text(encoding="utf-8"))
+            for field in (
+                "Song Duration",
+                "Tempo",
+                "Detected Key",
+                "Total Notes",
+                "Raw Notes",
+                "Clean Notes",
+                "Piano Arranged Notes",
+                "Final Notes",
+                "Removed Notes",
+                "Merged Notes",
+                "Octave Shifted",
+                "Bass Removed",
+                "Harmony Simplified",
+                "Melody Selected",
+            ):
+                self.assertIn(field, report)
 
 
 if __name__ == "__main__":

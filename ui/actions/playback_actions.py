@@ -72,8 +72,8 @@ class UiPlaybackActionsMixin:
     def start_keyboard_playback(self):
         self.start_playback()
 
-    def start_playback(self, start_sec=None, end_sec=None):
-        midi_path = self.get_selected_midi()
+    def start_playback(self, start_sec=None, end_sec=None, midi_path=None):
+        midi_path = midi_path or self.get_selected_midi()
         if not midi_path or self.playing:
             return
 

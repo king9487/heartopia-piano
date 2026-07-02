@@ -49,6 +49,9 @@ class YoutubeMidiApp(
     midi_choice_var: Any
     midi_source_var: Any
     available_midi_sources: dict
+    compare_a_source_var: Any
+    compare_b_source_var: Any
+    available_compare_sources: dict
     convert_vocals_midi_var: Any
     selected_midi_var: Any
     cached_choice_var: Any
@@ -75,6 +78,7 @@ class YoutubeMidiApp(
     range_start_var: Any
     range_end_var: Any
     status_var: Any
+    analysis_vars: dict
 
     studio_position_var: Any
     studio_current_time_var: Any
@@ -106,6 +110,8 @@ class YoutubeMidiApp(
     stop_button: ttk.Button | None
     play_button: ttk.Button | None
     midi_source_combo: ttk.Combobox | None
+    compare_a_combo: ttk.Combobox | None
+    compare_b_combo: ttk.Combobox | None
     cached_combo: ttk.Combobox | None
     studio_seek: ttk.Scale | None
     studio_play_button: ttk.Button | None

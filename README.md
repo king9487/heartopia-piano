@@ -13,10 +13,13 @@ Heartopia Piano converts YouTube videos or local audio into playable MIDI arrang
   - `original`
   - `melody_only`
   - `piano_cover`
-- Create `piano_cover_37key.mid` with melody priority, simplified harmony, and reduced bass repetition.
+- Create `piano_arranged_37key.mid` with melody scoring, continuity, two-hand simplification, and repeat reduction.
+- Write `piano_arranged_37key_report.json` with melody, harmony, bass, removal, merge, octave-shift, and final-note statistics.
+- Display conversion metadata and arrangement statistics in the MIDI Analysis panel and export them as `report.json`.
 - Optimize locally with rules or optionally with the OpenAI API.
 - Detect a likely key and correct short, weak, or unstable pitches.
 - Preview mapped notes before playback.
+- Compare two available MIDI versions with A/B playback without changing the current source.
 - Send MIDI notes as keyboard input to the target piano interface.
 - Load external `.mid` and `.midi` files.
 - Play MIDI through an external MIDI output when a compatible output or software synthesizer is available.
@@ -37,6 +40,8 @@ YouTube URL / Local Audio
             ↓
     clean_37key.mid
             ↓
+piano_arranged_37key.mid
+            ↓
  ai_optimized_37key.mid
             ↓
 pitch_corrected_37key.mid
@@ -49,7 +54,7 @@ pitch_corrected_37key.mid
     Keyboard Playback
 ```
 
-`piano_cover_37key.mid` is also generated from the raw transcription as a melody-first arrangement. The `melody_only` and `piano_cover` arrangement styles can also be selected when running Optimize MIDI.
+By default, `piano_arranged_37key.mid` is generated from `clean_37key.mid` as a melody-first, two-hand arrangement before AI optimization and pitch correction. The `original` style skips this transformation, while `melody_only` keeps only the top melodic line. `piano_cover_37key.mid` remains available as a compatibility copy.
 
 ## Project Structure
 
@@ -59,6 +64,7 @@ cli_app.py                  Command-line interface
 converter.py                Download, separation, transcription, and pipeline orchestration
 midi_rule_engine.py         37-key cleanup and range fitting
 midi_ai_optimizer.py        Rule/OpenAI optimization, pitch correction, and arrangements
+midi_piano_arranger.py      Piano Arranger V2 and arrangement statistics
 midi_editor.py              Suspicious-note detection and edited MIDI output
 midi_range.py               Time-range export
 midi_to_keyboard.py         MIDI preview and keyboard playback
@@ -82,7 +88,7 @@ MIDI processing remains in the root processing modules. The `ui/` package contai
 
 ### Main
 
-Enter a YouTube URL or open local audio, choose a converted result and MIDI version, preview notes, start keyboard playback, stop the current task, and view logs and status.
+Enter a YouTube URL or open local audio, choose a converted result and MIDI version, preview notes, start keyboard playback, stop the current task, and view logs and status. The A/B Compare section can play two available versions or set either one as the current MIDI. MIDI Analysis shows duration, tempo, detected key, stage note counts, and Piano Arranger reduction statistics from `report.json`.
 
 ### Playback Settings
 
@@ -106,14 +112,15 @@ Load the selected MIDI, play/pause/stop through an external MIDI output, seek th
 
 - **Raw MIDI**: Basic Pitch transcription before 37-key cleanup. Its filename is based on the transcribed source rather than literally `raw.mid`.
 - **`clean_37key.mid`**: Filters short or weak notes, fits notes into the playable range, and limits dense note windows.
-- **`piano_cover_37key.mid`**: Melody-first 37-key arrangement with simplified harmony and reduced repeated bass.
+- **`piano_arranged_37key.mid`**: Piano Arranger V2 output with a prioritized melody, simplified harmony, reduced bass, and at most three notes per onset group.
+- **`piano_cover_37key.mid`**: Compatibility copy of the selected piano-cover arrangement.
 - **`ai_optimized_37key.mid`**: Output from the selected local rule or OpenAI optimizer. It is also used for the melody-only arrangement stage.
 - **`pitch_corrected_37key.mid`**: Optimized MIDI adjusted using the detected key and pitch-correction rules.
 - **`final_37key.mid`**: Smoothed and quantized result intended for preview and keyboard playback.
 - **`edited_37key.mid`**: Optional result saved from MIDI Editor after manual note removal.
 - **`chorus_37key.mid`**: Optional exported time range.
 
-Not every intermediate file is produced by every arrangement style. Piano Cover and Melody Only preserve their selected melody directly rather than applying the normal pitch-correction chain.
+The default Piano Cover pipeline retains every normal intermediate output. The `original` style skips creation of a new Piano Cover transformation for that optimization run.
 
 ## Requirements
 

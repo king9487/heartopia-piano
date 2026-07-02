@@ -1,6 +1,7 @@
 from tkinter import ttk
 
 from ui.panels.cleanup_panel import build_cleanup_panel
+from ui.panels.analysis_panel import build_analysis_panel
 from ui.panels.convert_panel import build_convert_panel
 from ui.panels.log_panel import build_log_panel
 from ui.panels.midi_panel import build_midi_panel
@@ -12,6 +13,7 @@ def build_main_panel(app, parent):
     parent.columnconfigure(0, weight=1)
     next_row = build_convert_panel(app, parent)
     next_row = build_midi_panel(app, parent, next_row)
+    next_row = build_analysis_panel(app, parent, next_row)
     build_log_panel(app, parent, next_row)
 
 
