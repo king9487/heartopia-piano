@@ -26,6 +26,8 @@ class UiQueueHandlersMixin:
             "play_error": self._handle_play_error,
             "optimize_done": self._handle_optimize_done,
             "optimize_error": self._handle_optimize_error,
+            "rebuild_done": self._handle_rebuild_done,
+            "rebuild_error": self._handle_rebuild_error,
         }.get(kind)
         if handler is not None:
             handler(payload)
@@ -111,3 +113,23 @@ class UiQueueHandlersMixin:
     def _handle_optimize_error(self, payload):
         self.set_status("MIDI optimization failed")
         messagebox.showerror("MIDI optimization failed", payload)
+
+    def _handle_rebuild_done(self, payload):
+        if self.results:
+            prefix = "vocal" if self.midi_choice_var.get() == "vocal_midi" else "accompaniment"
+            for result_key in (
+                "clean_midi", "piano_arranged_midi", "piano_cover_midi",
+                "ai_optimized_midi", "pitch_corrected_midi", "final_midi",
+            ):
+                if payload.get(result_key):
+                    self.results[f"{prefix}_{result_key}"] = payload[result_key]
+            self.update_selected_midi()
+        else:
+            self.configure_midi_sources_from_path(payload["final_midi"])
+        stages = ", ".join(payload["regenerated_stages"])
+        self.log_message(f"Regenerated MIDI stages: {stages}")
+        self.set_status("MIDI rebuild finished")
+
+    def _handle_rebuild_error(self, payload):
+        self.set_status("MIDI rebuild failed")
+        messagebox.showerror("MIDI rebuild failed", payload)

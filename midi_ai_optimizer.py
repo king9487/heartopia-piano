@@ -763,6 +763,13 @@ def post_process_37key_midi(clean_midi, options=None):
         shutil.copyfile(arrangement_midi, legacy_piano_cover_midi)
         arrangement_input = arrangement_midi
         arrangement_name = "Melody Only"
+    elif options.get("force_arrangement_stage"):
+        # Targeted rebuilds still need a concrete arrangement-stage artifact.
+        # For the Original style this is an intentional pass-through, so Safe
+        # can avoid arrangement transformations without leaving the stage stale.
+        arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
+        shutil.copyfile(clean_midi, arrangement_midi)
+        arrangement_input = arrangement_midi
 
     ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
     pitch_corrected_midi = clean_midi.with_name(PITCH_CORRECTED_MIDI_NAME)

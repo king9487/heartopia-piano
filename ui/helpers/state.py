@@ -34,6 +34,7 @@ def initialize_app_state(app):
     app.transpose_var = tk.IntVar(value=0)
     app.chord_delay_var = tk.IntVar(value=18)
     app.min_hold_var = tk.IntVar(value=75)
+    app.processing_preset_var = tk.StringVar(value="Balanced")
     app.min_note_duration_var = tk.IntVar(value=35)
     app.velocity_threshold_var = tk.IntVar(value=12)
     app.max_simultaneous_var = tk.IntVar(value=0)

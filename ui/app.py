@@ -62,6 +62,7 @@ class YoutubeMidiApp(
     transpose_var: Any
     chord_delay_var: Any
     min_hold_var: Any
+    processing_preset_var: Any
     min_note_duration_var: Any
     velocity_threshold_var: Any
     max_simultaneous_var: Any

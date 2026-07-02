@@ -8,7 +8,9 @@ from midi_ai_optimizer import (
     PIANO_COVER_MIDI_NAME,
     PITCH_CORRECTED_MIDI_NAME,
     detect_key_for_midi,
+    pitch_correct_37key_midi,
     post_process_37key_midi,
+    smooth_37key_midi,
 )
 from midi_rule_engine import DEFAULT_37KEY_CLEAN_OPTIONS, convert_to_37key_midi
 from midi_analysis import (
@@ -133,6 +135,81 @@ def ensure_clean_37key_midi(raw_midi, options=None):
             options=clean_options,
         )
     )
+
+
+def rebuild_midi_stages(raw_midi, start_stage, options=None):
+    """Force one MIDI stage and its downstream stages, reusing prerequisites."""
+    raw_midi = Path(raw_midi)
+    if raw_midi.name.lower() == "edited_37key.mid":
+        raise ValueError("edited_37key.mid cannot be used as a rebuild source")
+    if not raw_midi.exists():
+        raise FileNotFoundError(raw_midi)
+    if start_stage not in {"clean", "piano_arranged", "final"}:
+        raise ValueError(f"Unknown MIDI rebuild stage: {start_stage}")
+
+    options = dict(options or {})
+    clean_midi = clean_37key_midi_path(raw_midi)
+    arranged_midi = piano_arranged_midi_path(raw_midi)
+    ai_midi = ai_optimized_midi_path(raw_midi)
+    pitch_midi = pitch_corrected_midi_path(raw_midi)
+    final_midi = final_37key_midi_path(raw_midi)
+    regenerated = []
+
+    needs_clean = start_stage in {"clean", "piano_arranged"} or (
+        start_stage == "final" and not pitch_midi.exists() and not ai_midi.exists()
+    )
+    if needs_clean and (start_stage == "clean" or not clean_midi.exists()):
+        clean_options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **options}
+        convert_to_37key_midi(raw_midi, clean_midi, options=clean_options)
+        regenerated.append("Clean")
+
+    if start_stage in {"clean", "piano_arranged"}:
+        result = post_process_37key_midi(
+            clean_midi, options={**options, "force_arrangement_stage": True}
+        )
+        if result.get("piano_arranged_midi"):
+            regenerated.append("Piano Arranged")
+        if result.get("piano_cover_midi"):
+            regenerated.append("Piano Cover")
+        regenerated.extend(("AI Optimized", "Pitch Corrected", "Final"))
+        result["regenerated_stages"] = regenerated
+        return result
+
+    if not pitch_midi.exists() and ai_midi.exists():
+        pitch_correct_37key_midi(ai_midi, output_midi=pitch_midi, options=options)
+        regenerated.append("Pitch Corrected")
+    elif not pitch_midi.exists():
+        # Final cannot be built without its prerequisite chain. Generate that
+        # chain only when the intermediate optimized MIDI is unavailable.
+        result = post_process_37key_midi(
+            clean_midi, options={**options, "force_arrangement_stage": True}
+        )
+        if result.get("piano_arranged_midi"):
+            regenerated.append("Piano Arranged")
+        if result.get("piano_cover_midi"):
+            regenerated.append("Piano Cover")
+        regenerated.extend(("AI Optimized", "Pitch Corrected", "Final"))
+        result["regenerated_stages"] = regenerated
+        return result
+
+    # The pitch-corrected file is the direct prerequisite for Final. Reusing it
+    # keeps a Final rebuild from touching Clean, arrangement, or optimization.
+    smooth_37key_midi(pitch_midi, output_midi=final_midi, options=options)
+    regenerated.append("Final")
+    return {
+        "clean_midi": clean_midi,
+        "piano_arranged_midi": arranged_midi if arranged_midi.exists() else None,
+        "piano_cover_midi": (
+            piano_cover_midi_path(raw_midi)
+            if piano_cover_midi_path(raw_midi).exists()
+            else None
+        ),
+        "ai_optimized_midi": ai_midi if ai_midi.exists() else None,
+        "pitch_corrected_midi": pitch_midi,
+        "final_midi": final_midi,
+        "detected_key": detect_key_for_midi(pitch_midi),
+        "regenerated_stages": regenerated,
+    }
 
 
 def ensure_full_post_processing(raw_midi, options=None):
