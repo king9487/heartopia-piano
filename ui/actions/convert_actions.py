@@ -105,6 +105,7 @@ class UiConvertActionsMixin:
             return
         self.results = None
         self.clear_midi_source_options()
+        self.external_part_selections = {}
         self.external_midi_path_var.set(filename)
         self.show_external_midi_metadata(metadata)
         self.results = {
@@ -125,6 +126,73 @@ class UiConvertActionsMixin:
         self.log_message(f"Imported MIDI ready for direct playback: {filename}")
 
     def show_external_midi_metadata(self, metadata):
+        self.external_midi_metadata = metadata
+        parts = metadata.get("musical_parts", ())
+        part_keys = {
+            (part["track_index"], part["channel"]) for part in parts
+        }
+        selections = getattr(self, "external_part_selections", {})
+        if set(selections) != part_keys:
+            selections = {}
+            for part in parts:
+                key = (part["track_index"], part["channel"])
+                recommended = (
+                    part["notes"] > 0 and part["playable_percentage"] >= 80.0
+                )
+                selections[key] = {
+                    "direct": recommended,
+                    "optimize": recommended,
+                }
+            self.external_part_selections = selections
+        risky_parts = [
+            part for part in parts
+            if part["notes"]
+            and part["out_of_range_notes"] / part["notes"] >= 0.20
+        ]
+        warning_var = getattr(self, "external_part_warning_var", None)
+        if warning_var is not None:
+            if risky_parts:
+                labels = ", ".join(
+                    f"T{part['track_index']}/Ch{part['channel']} "
+                    f"({part['out_of_range_notes']}/{part['notes']} out of range)"
+                    for part in risky_parts
+                )
+                warning_var.set(f"Warning: many out-of-range notes in {labels}")
+            else:
+                warning_var.set("")
+        source_path = metadata.get("source_path")
+        if source_path:
+            self.log_message(f"Original MIDI source: {source_path}")
+        source_tracks = metadata.get("notes_per_track", ())
+        self.log_message(f"Original MIDI track count: {len(source_tracks)}")
+        for track in source_tracks:
+            track_index = track.get("track_index", track["track_number"] - 1)
+            self.log_message(
+                f"Track {track_index} note count: {track['notes']}"
+            )
+            self.log_message(
+                f"Track {track_index} name: {track.get('name') or '(unnamed)'}"
+            )
+            for part in track.get("channel_programs", ()):
+                note_range = (
+                    f"{part['min_note']}..{part['max_note']}"
+                    if part["min_note"] is not None else "--"
+                )
+                default_label = "" if part.get("program_explicit") else " (default)"
+                self.log_message(
+                    f"Track {track_index} channel {part['channel']} "
+                    f"(MIDI {part['display_channel']}), program {part['program']} "
+                    f"{part['instrument']}{default_label}: notes {part['notes']}, "
+                    f"playable {part['playable_notes']}, "
+                    f"out of range {part['out_of_range_notes']}, range {note_range}"
+                )
+            for event in track.get("program_change_events", ()):
+                self.log_message(
+                    f"Track {track_index} program_change at tick {event['tick']}: "
+                    f"channel {event['channel']} (MIDI {event['display_channel']}), "
+                    f"program {event['program']} {event['instrument']}"
+                )
+
         total_notes = metadata["total_notes"]
         playable_notes = metadata["notes_inside_map"]
         playable_percentage = (
@@ -159,22 +227,63 @@ class UiConvertActionsMixin:
             self.external_midi_info_vars[key].set(str(value))
         track_tree = getattr(self, "external_midi_track_tree", None)
         if track_tree is not None:
+            self.external_part_tree_items = {}
             for item in track_tree.get_children():
                 track_tree.delete(item)
-            for track in metadata.get("notes_per_track", ()):
-                label = f"Track {track['track_number']}"
-                if track.get("name"):
-                    label += f" — {track['name']}"
-                track_tree.insert(
+            for track in source_tracks:
+                track_index = track.get("track_index", track["track_number"] - 1)
+                event_flags = []
+                if track.get("has_tempo_or_meta_events"):
+                    event_flags.append("Tempo/Meta")
+                if track.get("has_control_changes"):
+                    event_flags.append("Control")
+                if track.get("has_program_changes"):
+                    event_flags.append("Program")
+                parent = track_tree.insert(
                     "",
                     "end",
+                    text=(
+                        f"Track {track_index}"
+                        + (f" — {track['name']}" if track.get("name") else "")
+                    ),
+                    open=True,
                     values=(
-                        label,
+                        "",
+                        "",
+                        f"{track.get('channel_count', 0)} channel(s)",
                         track["notes"],
                         track["playable_notes"],
                         track["out_of_range_notes"],
+                        track.get("min_note") if track.get("min_note") is not None else "--",
+                        track.get("max_note") if track.get("max_note") is not None else "--",
+                        ", ".join(event_flags) or "--",
                     ),
                 )
+                for part in track.get("channel_parts", ()):
+                    key = (track_index, part["channel"])
+                    selection = selections.get(
+                        key, {"direct": False, "optimize": False}
+                    )
+                    item = track_tree.insert(
+                        parent,
+                        "end",
+                        text=(
+                            f"Channel {part['channel']} "
+                            f"(MIDI {part['display_channel']})"
+                        ),
+                        values=(
+                            "☑" if selection["direct"] else "☐",
+                            "☑" if selection["optimize"] else "☐",
+                            part["instrument"] or "--",
+                            part["notes"],
+                            part["playable_notes"],
+                            part["out_of_range_notes"],
+                            part["min_note"] if part["min_note"] is not None else "--",
+                            part["max_note"] if part["max_note"] is not None else "--",
+                            "--",
+                        ),
+                    )
+                    self.external_part_tree_items[str(item)] = key
         channel_tree = getattr(self, "external_midi_channel_tree", None)
         if channel_tree is not None:
             for item in channel_tree.get_children():
@@ -183,8 +292,34 @@ class UiConvertActionsMixin:
                 channel_tree.insert(
                     "",
                     "end",
-                    values=(f"Channel {channel['channel']}", channel["notes"]),
+                    values=(
+                        f"MIDI {channel['channel']} (file {channel['channel'] - 1})",
+                        channel["notes"],
+                    ),
                 )
+
+    def on_external_part_tree_click(self, event):
+        tree = getattr(self, "external_midi_track_tree", None)
+        if tree is None or tree.identify("region", event.x, event.y) != "cell":
+            return None
+        column = tree.identify_column(event.x)
+        if column not in ("#1", "#2"):
+            return None
+        item = tree.identify_row(event.y)
+        key = getattr(self, "external_part_tree_items", {}).get(str(item))
+        if key is None:
+            return None
+        purpose = "direct" if column == "#1" else "optimize"
+        selected = not self.external_part_selections[key][purpose]
+        self.external_part_selections[key][purpose] = selected
+        tree.set(item, purpose, "☑" if selected else "☐")
+        return "break"
+
+    def get_selected_external_parts(self, purpose):
+        return {
+            key for key, selection in self.external_part_selections.items()
+            if selection.get(purpose)
+        }
 
     def clear_external_midi_analysis(self):
         for attribute in ("external_midi_track_tree", "external_midi_channel_tree"):
@@ -208,8 +343,21 @@ class UiConvertActionsMixin:
 
     def play_original_midi(self):
         midi_path = self.get_imported_original_midi()
-        if midi_path:
-            self.start_playback(midi_path=midi_path)
+        if not midi_path:
+            return
+        selected_parts = self.get_selected_external_parts("direct")
+        if not selected_parts:
+            messagebox.showwarning(
+                "No direct-play parts",
+                "Select at least one Track/Channel part for Direct Play.",
+            )
+            return
+        self.start_playback(
+            midi_path=midi_path,
+            original_events=True,
+            original_part_filter=selected_parts,
+            original_range_mode=self.external_part_range_mode_var.get(),
+        )
 
     def open_original_midi(self):
         midi_path = self.get_imported_original_midi()
@@ -236,6 +384,14 @@ class UiConvertActionsMixin:
             "ai_optimizer": bool(self.skip_ai_optimizer_var.get()),
             "pitch_correction": bool(self.skip_pitch_correction_var.get()),
         }
+        selected_parts = self.get_selected_external_parts("optimize")
+        if not selected_parts:
+            messagebox.showwarning(
+                "No optimization parts",
+                "Select at least one Track/Channel part for Optimization.",
+            )
+            return
+        part_range_mode = self.external_part_range_mode_var.get()
         self._begin_conversion(
             "Processing imported MIDI...",
             f"Processing imported MIDI: {filename}",
@@ -243,16 +399,20 @@ class UiConvertActionsMixin:
         )
         threading.Thread(
             target=self.external_midi_import_worker,
-            args=(filename, options, skips),
+            args=(filename, options, skips, selected_parts, part_range_mode),
             daemon=True,
         ).start()
 
-    def external_midi_import_worker(self, filename, options, skips):
+    def external_midi_import_worker(
+        self, filename, options, skips, selected_parts, part_range_mode
+    ):
         try:
             result = import_external_midi(
                 filename,
                 options=options,
                 skips=skips,
+                selected_parts=selected_parts,
+                part_range_mode=part_range_mode,
                 progress_callback=lambda message: self.queue.put(("log", message)),
             )
             self.queue.put(("external_midi_done", result))

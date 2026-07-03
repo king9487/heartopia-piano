@@ -2,11 +2,13 @@ import hashlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import mido
 
-from converter import import_external_midi
+from converter import import_external_midi, write_selected_parts_midi
 from midi_analysis import inspect_midi_file
+from midi_to_keyboard import build_original_keyboard_schedule
 
 
 def write_midi(path, *, ppq=480, tracks=1, tempo=500000, notes=(60, 64, 76)):
@@ -60,7 +62,7 @@ class ExternalMidiImportTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), original_hash)
             self.assertNotEqual(result["imported_midi"], source)
             for key in (
-                "imported_midi", "clean_midi", "piano_arranged_midi",
+                "imported_midi", "selected_parts_midi", "clean_midi", "piano_arranged_midi",
                 "ai_optimized_midi", "pitch_corrected_midi", "final_midi",
             ):
                 self.assertTrue(result[key].is_file(), key)
@@ -103,47 +105,250 @@ class ExternalMidiImportTests(unittest.TestCase):
             midi = mido.MidiFile(type=1, ticks_per_beat=480)
             meta_track = mido.MidiTrack()
             meta_track.name = "Conductor"
+            meta_track.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))
             midi.tracks.append(meta_track)
             piano_track = mido.MidiTrack()
             piano_track.name = "Piano"
             piano_track.extend(
                 (
+                    mido.Message("program_change", channel=0, program=1, time=0),
+                    mido.Message("control_change", channel=0, control=64, value=127, time=0),
                     mido.Message("note_on", channel=0, note=60, velocity=80, time=0),
                     mido.Message("note_on", channel=0, note=73, velocity=80, time=0),
+                    mido.Message("note_off", channel=0, note=60, velocity=0, time=480),
+                    mido.Message("note_off", channel=0, note=73, velocity=0, time=0),
                 )
             )
             midi.tracks.append(piano_track)
             bass_track = mido.MidiTrack()
             bass_track.name = "Bass"
-            bass_track.append(
-                mido.Message("note_on", channel=2, note=48, velocity=80, time=0)
-            )
+            bass_track.extend((
+                mido.Message("note_on", channel=2, note=48, velocity=80, time=0),
+                mido.Message("note_off", channel=2, note=48, velocity=0, time=480),
+            ))
             midi.tracks.append(bass_track)
             midi.save(source)
 
             metadata = inspect_midi_file(source)
 
+            tracks = metadata["notes_per_track"]
+            self.assertEqual([track["track_index"] for track in tracks], [0, 1, 2])
+            self.assertEqual([track["name"] for track in tracks], [
+                "Conductor", "Piano", "Bass"
+            ])
+            self.assertEqual([track["notes"] for track in tracks], [0, 2, 1])
+            self.assertEqual(tracks[0]["channel_programs"], [])
             self.assertEqual(
-                metadata["notes_per_track"],
-                [
-                    {
-                        "track_number": 1, "name": "Conductor", "notes": 0,
-                        "playable_notes": 0, "out_of_range_notes": 0,
-                    },
-                    {
-                        "track_number": 2, "name": "Piano", "notes": 2,
-                        "playable_notes": 1, "out_of_range_notes": 1,
-                    },
-                    {
-                        "track_number": 3, "name": "Bass", "notes": 1,
-                        "playable_notes": 1, "out_of_range_notes": 0,
-                    },
-                ],
+                tracks[1]["channel_programs"],
+                [{
+                    "channel": 0, "display_channel": 1, "program": 1,
+                    "instrument": "Bright Acoustic Piano",
+                    "program_explicit": True, "notes": 2,
+                    "playable_notes": 1, "out_of_range_notes": 1,
+                    "min_note": 60, "max_note": 73,
+                }],
             )
+            self.assertEqual(tracks[2]["channel_programs"][0]["channel"], 2)
+            self.assertEqual(tracks[2]["channel_programs"][0]["program"], 0)
+            self.assertFalse(tracks[2]["channel_programs"][0]["program_explicit"])
             self.assertEqual(metadata["notes_per_channel"][0]["notes"], 2)
             self.assertEqual(metadata["notes_per_channel"][2]["notes"], 1)
             self.assertEqual(
                 sum(item["notes"] for item in metadata["notes_per_channel"]), 3
+            )
+
+    def test_track_analysis_keeps_618_517_and_312_as_physical_tracks(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "three-source-tracks.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            for track_index, note_count in enumerate((618, 517, 312)):
+                track = mido.MidiTrack()
+                track.name = f"Part {track_index}"
+                channel = track_index
+                for note_index in range(note_count):
+                    note = 48 + (note_index % 24)
+                    track.append(mido.Message(
+                        "note_on", channel=channel, note=note, velocity=80, time=0
+                    ))
+                    track.append(mido.Message(
+                        "note_off", channel=channel, note=note, velocity=0, time=1
+                    ))
+                midi.tracks.append(track)
+            midi.save(source)
+
+            with patch("midi_analysis.mido.merge_tracks") as merge_tracks:
+                metadata = inspect_midi_file(source)
+
+            merge_tracks.assert_not_called()
+            self.assertEqual(metadata["tracks"], 3)
+            self.assertEqual(
+                [track["track_index"] for track in metadata["notes_per_track"]],
+                [0, 1, 2],
+            )
+            self.assertEqual(
+                [track["notes"] for track in metadata["notes_per_track"]],
+                [618, 517, 312],
+            )
+
+    def test_track_analysis_counts_only_completed_pairs(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "pairs.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            track = mido.MidiTrack()
+            track.extend((
+                mido.Message("note_on", channel=0, note=60, velocity=80, time=0),
+                mido.Message("note_off", channel=0, note=60, velocity=0, time=120),
+                mido.Message("note_on", channel=0, note=62, velocity=80, time=0),
+            ))
+            midi.tracks.append(track)
+            midi.tracks.append(mido.MidiTrack())
+            midi.save(source)
+
+            metadata = inspect_midi_file(source)
+
+            self.assertEqual(
+                [track["notes"] for track in metadata["notes_per_track"]], [1, 0]
+            )
+
+    def test_original_keyboard_schedule_uses_raw_messages_and_timing(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "raw-events.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            conductor = mido.MidiTrack()
+            conductor.append(mido.MetaMessage("set_tempo", tempo=1000000, time=0))
+            midi.tracks.append(conductor)
+            notes = mido.MidiTrack()
+            notes.extend((
+                mido.Message("program_change", channel=0, program=40, time=0),
+                mido.Message("note_on", channel=0, note=60, velocity=80, time=480),
+                mido.Message("control_change", channel=0, control=64, value=127, time=240),
+                mido.Message("note_off", channel=0, note=60, velocity=0, time=240),
+            ))
+            midi.tracks.append(notes)
+            midi.save(source)
+            source_bytes = source.read_bytes()
+
+            with patch("midi_to_keyboard.mido.merge_tracks") as merge_tracks:
+                schedule = build_original_keyboard_schedule(source)
+
+            merge_tracks.assert_not_called()
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual([event[1:] for event in schedule], [
+                ("down", 60, "q"), ("up", 60, "q")
+            ])
+            self.assertAlmostEqual(schedule[0][0], 1.0)
+            self.assertAlmostEqual(schedule[1][0], 2.0)
+
+    def test_selected_parts_midi_filters_by_physical_track_and_channel(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "parts.mid"
+            selected = root / "selected.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            first = mido.MidiTrack()
+            first.extend((
+                mido.Message("note_on", channel=0, note=84, velocity=80, time=0),
+                mido.Message("note_off", channel=0, note=84, velocity=0, time=120),
+                mido.Message("note_on", channel=1, note=60, velocity=80, time=0),
+                mido.Message("note_off", channel=1, note=60, velocity=0, time=120),
+            ))
+            second = mido.MidiTrack()
+            second.extend((
+                mido.Message("note_on", channel=0, note=48, velocity=80, time=0),
+                mido.Message("note_off", channel=0, note=48, velocity=0, time=120),
+            ))
+            midi.tracks.extend((first, second))
+            midi.save(source)
+            source_hash = hashlib.sha256(source.read_bytes()).digest()
+
+            write_selected_parts_midi(source, selected, {(0, 1)}, "keep")
+
+            metadata = inspect_midi_file(selected)
+            self.assertEqual(
+                [track["notes"] for track in metadata["notes_per_track"]], [1, 0]
+            )
+            self.assertEqual(metadata["musical_parts"][0]["track_index"], 0)
+            self.assertEqual(metadata["musical_parts"][0]["channel"], 1)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), source_hash)
+
+    def test_selected_parts_range_modes_shift_or_drop_out_of_range_notes(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "range.mid"
+            shifted = root / "shifted.mid"
+            dropped = root / "dropped.mid"
+            write_midi(source, notes=(84,))
+
+            write_selected_parts_midi(source, shifted, {(0, 0)}, "octave_shift")
+            write_selected_parts_midi(source, dropped, {(0, 0)}, "drop")
+
+            self.assertEqual(
+                inspect_midi_file(shifted)["musical_parts"][0]["min_note"], 72
+            )
+            self.assertEqual(inspect_midi_file(dropped)["total_notes"], 0)
+
+    def test_import_pipeline_starts_from_optimization_selected_parts(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "pipeline-parts.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            track = mido.MidiTrack()
+            for channel, note in ((0, 60), (1, 64)):
+                track.append(mido.Message(
+                    "note_on", channel=channel, note=note, velocity=80, time=0
+                ))
+                track.append(mido.Message(
+                    "note_off", channel=channel, note=note, velocity=0, time=120
+                ))
+            midi.tracks.append(track)
+            midi.save(source)
+            source_bytes = source.read_bytes()
+
+            result = import_external_midi(
+                source,
+                output_root=root / "output",
+                selected_parts={(0, 1)},
+                skips={
+                    "cleanup": True,
+                    "piano_arranger": True,
+                    "ai_optimizer": True,
+                    "pitch_correction": True,
+                },
+            )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(result["imported_midi"].read_bytes(), source_bytes)
+            selected_metadata = inspect_midi_file(result["selected_parts_midi"])
+            self.assertEqual(selected_metadata["total_notes"], 1)
+            self.assertEqual(selected_metadata["musical_parts"][0]["channel"], 1)
+            self.assertEqual(
+                result["clean_midi"].read_bytes(),
+                result["selected_parts_midi"].read_bytes(),
+            )
+
+    def test_original_schedule_filters_track_channel_parts_and_octave_shifts(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "direct-parts.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            track = mido.MidiTrack()
+            track.extend((
+                mido.Message("note_on", channel=0, note=60, velocity=80, time=0),
+                mido.Message("note_off", channel=0, note=60, velocity=0, time=120),
+                mido.Message("note_on", channel=1, note=84, velocity=80, time=0),
+                mido.Message("note_off", channel=1, note=84, velocity=0, time=120),
+            ))
+            midi.tracks.append(track)
+            midi.save(source)
+
+            schedule = build_original_keyboard_schedule(
+                source,
+                part_filter={(0, 1)},
+                out_of_range_mode="octave_shift",
+            )
+
+            self.assertEqual(
+                [(event[1], event[2], event[3]) for event in schedule],
+                [("down", 72, "i"), ("up", 72, "i")],
             )
 
     def test_skipped_stages_create_named_pass_through_working_files(self):

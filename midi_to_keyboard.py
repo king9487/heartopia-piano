@@ -83,6 +83,87 @@ def is_note_off(message):
     )
 
 
+def build_original_keyboard_schedule(
+    midi_path,
+    note_map=None,
+    speed=1.0,
+    start_sec=None,
+    end_sec=None,
+    part_filter=None,
+    out_of_range_mode="keep",
+):
+    """Map source note messages directly without rebuilding note objects."""
+    if speed <= 0:
+        raise ValueError("speed must be greater than 0")
+    note_map = note_map or DEFAULT_NOTE_MAP
+    range_start = 0.0 if start_sec is None else float(start_sec)
+    range_end = None if end_sec is None else float(end_sec)
+    if range_start < 0:
+        raise ValueError("start_sec must be greater than or equal to 0")
+    if range_end is not None and range_end <= range_start:
+        raise ValueError("end_sec must be greater than start_sec")
+
+    schedule = []
+    midi = mido.MidiFile(midi_path)
+    tempo_changes = []
+    note_messages = []
+    for track_index, track in enumerate(midi.tracks):
+        absolute_tick = 0
+        for event_index, message in enumerate(track):
+            absolute_tick += message.time
+            identity = (absolute_tick, track_index, event_index)
+            if message.type == "set_tempo":
+                tempo_changes.append((*identity, message.tempo))
+            elif message.type in ("note_on", "note_off"):
+                note_messages.append((*identity, message))
+
+    # Convert each physical track's events to one playback clock without
+    # mido.merge_tracks or any RuleNote reconstruction.
+    tempo_changes.sort()
+    tempo_index = 0
+    tempo_tick = 0
+    tempo_seconds = 0.0
+    tempo = 500000
+    selected_parts = set(part_filter) if part_filter is not None else None
+    for absolute_tick, track_index, _event_index, message in sorted(note_messages):
+        while (
+            tempo_index < len(tempo_changes)
+            and tempo_changes[tempo_index][0] <= absolute_tick
+        ):
+            change_tick, _track, _event, new_tempo = tempo_changes[tempo_index]
+            tempo_seconds += mido.tick2second(
+                change_tick - tempo_tick, midi.ticks_per_beat, tempo
+            )
+            tempo_tick = change_tick
+            tempo = new_tempo
+            tempo_index += 1
+        elapsed = tempo_seconds + mido.tick2second(
+            absolute_tick - tempo_tick, midi.ticks_per_beat, tempo
+        )
+        if elapsed < range_start:
+            continue
+        if range_end is not None and elapsed >= range_end:
+            break
+        if message.type == "note_on" and message.velocity > 0:
+            action = "down"
+        elif is_note_off(message):
+            action = "up"
+        else:
+            continue
+        if (
+            selected_parts is not None
+            and (track_index, message.channel) not in selected_parts
+        ):
+            continue
+        mapped_note = message.note
+        if mapped_note not in note_map and out_of_range_mode == "octave_shift":
+            mapped_note = octave_shift_note(mapped_note, note_map)
+        key = note_map.get(mapped_note)
+        if key is not None:
+            schedule.append(((elapsed - range_start) / speed, action, mapped_note, key))
+    return schedule
+
+
 @dataclass
 class CleanNoteEvent:
     start: float
@@ -685,4 +766,50 @@ def play_midi_as_keyboard(
                 active_keys.discard(key)
     finally:
         for key in active_keys:
+            keyboard.release(key)
+
+
+def play_original_midi_as_keyboard(
+    midi_path,
+    note_map=None,
+    speed=1.0,
+    stop_event=None,
+    start_sec=None,
+    end_sec=None,
+    part_filter=None,
+    out_of_range_mode="keep",
+):
+    """Play source note_on/note_off messages with no RuleNote cleanup path."""
+    schedule = build_original_keyboard_schedule(
+        midi_path, note_map=note_map, speed=speed,
+        start_sec=start_sec, end_sec=end_sec,
+        part_filter=part_filter, out_of_range_mode=out_of_range_mode,
+    )
+    active_counts = {}
+    started_at = time.perf_counter()
+    try:
+        for timestamp, action, _note, key in schedule:
+            if stop_event is not None and stop_event.is_set():
+                break
+            target_time = started_at + timestamp
+            delay = target_time - time.perf_counter()
+            while delay > 0:
+                if stop_event is not None and stop_event.is_set():
+                    return
+                time.sleep(min(delay, 0.05))
+                delay = target_time - time.perf_counter()
+
+            count = active_counts.get(key, 0)
+            if action == "down":
+                if count == 0:
+                    keyboard.press(key)
+                active_counts[key] = count + 1
+            elif count > 0:
+                if count == 1:
+                    keyboard.release(key)
+                    active_counts.pop(key, None)
+                else:
+                    active_counts[key] = count - 1
+    finally:
+        for key in active_counts:
             keyboard.release(key)

@@ -24,6 +24,10 @@ def initialize_app_state(app):
     app.skip_ai_optimizer_var = tk.BooleanVar(value=False)
     app.skip_pitch_correction_var = tk.BooleanVar(value=False)
     app.direct_preview_var = tk.BooleanVar(value=False)
+    app.external_part_range_mode_var = tk.StringVar(value="keep")
+    app.external_part_warning_var = tk.StringVar(value="")
+    app.external_part_selections = {}
+    app.external_part_tree_items = {}
     app.external_midi_info_vars = {
         key: tk.StringVar(value="--")
         for key in (

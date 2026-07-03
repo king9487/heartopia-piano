@@ -30,10 +30,13 @@ from midi_piano_arranger import (
     arrange_piano_midi,
 )
 from tools import find_executable, find_ffmpeg_location, run, run_capture
+from midi_to_keyboard import DEFAULT_NOTE_MAP, octave_shift_note
 
 
 CLEAN_37KEY_MIDI_NAME = "clean_37key.mid"
+SELECTED_PARTS_MIDI_NAME = "selected_parts.mid"
 GENERATED_MIDI_NAMES = {
+    SELECTED_PARTS_MIDI_NAME,
     CLEAN_37KEY_MIDI_NAME,
     AI_OPTIMIZED_MIDI_NAME,
     PITCH_CORRECTED_MIDI_NAME,
@@ -97,8 +100,81 @@ def output_dir_for_midi_file(midi_file, output_root="output"):
     return Path(output_root) / sanitize_filename(f"{midi_file.stem}_midi")
 
 
+def write_selected_parts_midi(
+    input_midi, output_midi, selected_parts=None, range_mode="keep"
+):
+    """Write a working MIDI containing selected physical-track/channel parts."""
+    if range_mode not in {"keep", "octave_shift", "drop"}:
+        raise ValueError(f"Unknown selected-part range mode: {range_mode}")
+    selected = None if selected_parts is None else {
+        (int(track), int(channel)) for track, channel in selected_parts
+    }
+    if selected is not None and not selected:
+        raise ValueError("At least one Track/Channel part must be selected")
+
+    source = mido.MidiFile(input_midi)
+    output = mido.MidiFile(type=source.type, ticks_per_beat=source.ticks_per_beat)
+    for track_index, track in enumerate(source.tracks):
+        output_track = mido.MidiTrack()
+        output.tracks.append(output_track)
+        pending_time = 0
+        active_notes = {}
+        for message in track:
+            pending_time += message.time
+            keep = message.is_meta
+            copied = message
+            if not message.is_meta:
+                part_selected = (
+                    selected is None
+                    or not hasattr(message, "channel")
+                    or (track_index, message.channel) in selected
+                )
+                if not part_selected:
+                    keep = False
+                elif message.type == "note_on" and message.velocity > 0:
+                    target_note = message.note
+                    if target_note not in DEFAULT_NOTE_MAP:
+                        if range_mode == "octave_shift":
+                            target_note = octave_shift_note(target_note, DEFAULT_NOTE_MAP)
+                        elif range_mode == "drop":
+                            target_note = None
+                    key = (message.channel, message.note)
+                    active_notes.setdefault(key, []).append(target_note)
+                    keep = target_note is not None
+                    if keep:
+                        copied = message.copy(note=target_note)
+                elif hasattr(message, "channel") and (
+                    message.type == "note_off" or (
+                    message.type == "note_on" and message.velocity == 0
+                    )
+                ):
+                    key = (message.channel, message.note)
+                    targets = active_notes.get(key)
+                    target_note = targets.pop(0) if targets else message.note
+                    if targets == []:
+                        active_notes.pop(key, None)
+                    keep = target_note is not None
+                    if keep:
+                        copied = message.copy(note=target_note)
+                else:
+                    keep = True
+            if keep:
+                output_track.append(copied.copy(time=pending_time))
+                pending_time = 0
+
+    output_midi = Path(output_midi)
+    output.save(output_midi)
+    return output_midi
+
+
 def import_external_midi(
-    midi_file, output_root="output", options=None, skips=None, progress_callback=None
+    midi_file,
+    output_root="output",
+    options=None,
+    skips=None,
+    progress_callback=None,
+    selected_parts=None,
+    part_range_mode="keep",
 ):
     """Copy and process an arbitrary MIDI through the Heartopia MIDI stages."""
     report_progress = progress_callback or (lambda message: None)
@@ -126,6 +202,16 @@ def import_external_midi(
             normalized.tracks.append(mido.MidiTrack(message.copy() for message in track))
         normalized.save(imported_midi)
 
+    selected_parts_midi = base_dir / SELECTED_PARTS_MIDI_NAME
+    report_progress("Creating selected Track/Channel working MIDI...")
+    write_selected_parts_midi(
+        imported_midi,
+        selected_parts_midi,
+        selected_parts=selected_parts,
+        range_mode=part_range_mode,
+    )
+    pipeline_input = selected_parts_midi
+
     options = dict(options or {})
     skips = dict(skips or {})
     clean_midi = base_dir / CLEAN_37KEY_MIDI_NAME
@@ -136,10 +222,10 @@ def import_external_midi(
 
     if skips.get("cleanup"):
         report_progress("Cleanup skipped; creating clean_37key.mid pass-through.")
-        shutil.copyfile(imported_midi, clean_midi)
+        shutil.copyfile(pipeline_input, clean_midi)
     else:
         report_progress("Running Cleanup...")
-        convert_to_37key_midi(imported_midi, clean_midi, options=options)
+        convert_to_37key_midi(pipeline_input, clean_midi, options=options)
 
     arrangement_statistics = {}
     arrangement_report = base_dir / PIANO_ARRANGEMENT_REPORT_NAME
@@ -200,7 +286,7 @@ def import_external_midi(
         final_input = final_midi
     smooth_37key_midi(final_input, output_midi=final_midi, options=options)
     analysis_report = build_midi_analysis_report(
-        imported_midi,
+        selected_parts_midi,
         clean_midi,
         arranged_midi,
         final_midi,
@@ -216,6 +302,7 @@ def import_external_midi(
         "base_dir": base_dir,
         "source_midi": source,
         "imported_midi": imported_midi,
+        "selected_parts_midi": selected_parts_midi,
         "clean_midi": clean_midi,
         "piano_arranged_midi": arranged_midi,
         "ai_optimized_midi": ai_midi,

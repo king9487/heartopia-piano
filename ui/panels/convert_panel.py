@@ -128,20 +128,30 @@ def build_import_panel(app, parent, start_row=0):
     analysis.columnconfigure(0, weight=3)
     analysis.columnconfigure(1, weight=2)
 
-    tracks = ttk.LabelFrame(analysis, text="Notes by Track", padding=6)
+    tracks = ttk.LabelFrame(analysis, text="Source Tracks", padding=6)
     tracks.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
     tracks.columnconfigure(0, weight=1)
     app.external_midi_track_tree = ttk.Treeview(
         tracks,
-        columns=("track", "notes", "playable", "outside"),
-        show="headings",
+        columns=(
+            "direct", "optimize", "program", "notes", "playable",
+            "outside", "min", "max", "events",
+        ),
+        show=("tree", "headings"),
         height=5,
     )
+    app.external_midi_track_tree.heading("#0", text="Track / Channel")
+    app.external_midi_track_tree.column("#0", width=180, minwidth=120, anchor="w")
     for column, heading, width, anchor in (
-        ("track", "Track", 190, "w"),
+        ("direct", "Use Direct", 72, "center"),
+        ("optimize", "Use Optimization", 105, "center"),
+        ("program", "Program / Instrument", 190, "w"),
         ("notes", "Notes", 60, "e"),
         ("playable", "Playable", 70, "e"),
         ("outside", "Out of range", 90, "e"),
+        ("min", "Min", 48, "e"),
+        ("max", "Max", 48, "e"),
+        ("events", "Track Events", 130, "w"),
     ):
         app.external_midi_track_tree.heading(column, text=heading)
         app.external_midi_track_tree.column(
@@ -153,8 +163,16 @@ def build_import_panel(app, parent, start_row=0):
     )
     track_scroll.grid(row=0, column=1, sticky="ns")
     app.external_midi_track_tree.configure(yscrollcommand=track_scroll.set)
+    track_horizontal = ttk.Scrollbar(
+        tracks, orient="horizontal", command=app.external_midi_track_tree.xview
+    )
+    track_horizontal.grid(row=1, column=0, sticky="ew")
+    app.external_midi_track_tree.configure(xscrollcommand=track_horizontal.set)
+    app.external_midi_track_tree.bind("<Button-1>", app.on_external_part_tree_click)
 
-    channels = ttk.LabelFrame(analysis, text="Notes by Channel", padding=6)
+    channels = ttk.LabelFrame(
+        analysis, text="Global Notes by Channel (MIDI 1–16 / file 0–15)", padding=6
+    )
     channels.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
     channels.columnconfigure(0, weight=1)
     app.external_midi_channel_tree = ttk.Treeview(
@@ -173,6 +191,28 @@ def build_import_panel(app, parent, start_row=0):
     )
     channel_scroll.grid(row=0, column=1, sticky="ns")
     app.external_midi_channel_tree.configure(yscrollcommand=channel_scroll.set)
+
+    selection_options = ttk.Frame(original)
+    selection_options.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    ttk.Label(selection_options, text="Selected-part out-of-range handling:").grid(
+        row=0, column=0, sticky="w"
+    )
+    for row, (text, value) in enumerate((
+        ("Keep original (direct play)", "keep"),
+        ("Octave shift into playable range", "octave_shift"),
+        ("Drop out-of-range notes", "drop"),
+    ), start=1):
+        ttk.Radiobutton(
+            selection_options,
+            text=text,
+            value=value,
+            variable=app.external_part_range_mode_var,
+        ).grid(row=row, column=0, sticky="w", padx=(14, 0))
+    ttk.Label(
+        selection_options,
+        textvariable=app.external_part_warning_var,
+        foreground="#a05a00",
+    ).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     optimize = ttk.LabelFrame(
         parent, text="Optimize for Heartopia", padding=12

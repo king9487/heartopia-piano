@@ -19,6 +19,7 @@ MIDI_SOURCE_PRIORITY = (
     "Edited",
     "Final 37-Key MIDI",
     "Final",
+    "Final MIDI",
     "Piano Arranged MIDI",
     "Piano Arranged",
     "Piano Cover MIDI",
@@ -27,10 +28,14 @@ MIDI_SOURCE_PRIORITY = (
     "Clean 37-Key MIDI",
     "Clean",
     "Imported MIDI",
+    "Full Imported MIDI",
+    "Selected Parts MIDI",
     "Raw MIDI",
     "Transposed MIDI",
 )
 COMPARE_SOURCE_PRIORITY = (
+    "Full Imported MIDI",
+    "Selected Parts MIDI",
     "Imported MIDI",
     "Imported",
     "Raw MIDI",
@@ -43,6 +48,7 @@ COMPARE_SOURCE_PRIORITY = (
     "Pitch Corrected MIDI",
     "Final 37-Key MIDI",
     "Final",
+    "Final MIDI",
     "Edited MIDI",
     "Edited",
 )
@@ -122,7 +128,10 @@ class MidiSelectionMixin:
             preferred_a = next(
                 (
                     label
-                    for label in ("Imported MIDI", "Clean", "Clean 37-Key MIDI", "Raw MIDI")
+                    for label in (
+                        "Full Imported MIDI", "Imported MIDI", "Clean",
+                        "Clean 37-Key MIDI", "Raw MIDI",
+                    )
                     if label in available
                 ),
                 labels[0] if labels else "",
@@ -133,11 +142,13 @@ class MidiSelectionMixin:
                 (
                     label
                     for label in (
+                        "Selected Parts MIDI",
                         "Piano Arranged MIDI",
                         "Piano Arranged",
                         "Piano Cover MIDI",
                         "Final 37-Key MIDI",
                         "Final",
+                        "Final MIDI",
                     )
                     if label in available
                 ),
@@ -150,9 +161,16 @@ class MidiSelectionMixin:
         return self.available_compare_sources.get(variable.get())
 
     def play_compare_midi(self, side):
+        variable = self.compare_a_source_var if side == "A" else self.compare_b_source_var
+        label = variable.get()
         midi_path = self.get_compare_midi(side)
         if midi_path:
-            self.start_playback(midi_path=midi_path)
+            self.start_playback(
+                midi_path=midi_path,
+                original_events=label in {
+                    "Full Imported MIDI", "Imported MIDI", "Selected Parts MIDI"
+                },
+            )
 
     def set_compare_as_current(self, side):
         variable = self.compare_a_source_var if side == "A" else self.compare_b_source_var
@@ -169,15 +187,16 @@ class MidiSelectionMixin:
 
         if self.results.get("input_source") == "external_midi":
             sources = {
-                "Imported MIDI": (
+                "Full Imported MIDI": (
                     self.results.get("source_midi")
                     or self.results.get("imported_midi")
                 ),
+                "Selected Parts MIDI": self.results.get("selected_parts_midi"),
                 "Clean": self.results.get("clean_midi"),
                 "Piano Arranged": self.results.get("piano_arranged_midi"),
                 "AI Optimized MIDI": self.results.get("ai_optimized_midi"),
                 "Pitch Corrected MIDI": self.results.get("pitch_corrected_midi"),
-                "Final": self.results.get("final_midi"),
+                "Final MIDI": self.results.get("final_midi"),
             }
             if self.results.get("base_dir"):
                 sources["Edited"] = (

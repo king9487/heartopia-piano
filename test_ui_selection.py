@@ -51,6 +51,7 @@ class MidiSelectionTests(unittest.TestCase):
             folder = Path(directory)
             names = {
                 "imported_midi": "imported.mid",
+                "selected_parts_midi": "selected_parts.mid",
                 "clean_midi": "clean_37key.mid",
                 "piano_arranged_midi": "piano_arranged_37key.mid",
                 "ai_optimized_midi": "ai_optimized_37key.mid",
@@ -67,10 +68,11 @@ class MidiSelectionTests(unittest.TestCase):
             }
             app.update_selected_midi()
 
-            self.assertEqual(app.midi_source_var.get(), "Final")
-            self.assertIn("Imported MIDI", app.available_midi_sources)
-            self.assertEqual(app.compare_a_source_var.get(), "Imported MIDI")
-            self.assertEqual(app.compare_b_source_var.get(), "Piano Arranged")
+            self.assertEqual(app.midi_source_var.get(), "Final MIDI")
+            self.assertIn("Full Imported MIDI", app.available_midi_sources)
+            self.assertIn("Selected Parts MIDI", app.available_midi_sources)
+            self.assertEqual(app.compare_a_source_var.get(), "Full Imported MIDI")
+            self.assertEqual(app.compare_b_source_var.get(), "Selected Parts MIDI")
 
     def test_ab_compare_uses_existing_sources_without_changing_current(self):
         with TemporaryDirectory() as directory:

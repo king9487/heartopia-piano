@@ -81,6 +81,7 @@ class UiQueueHandlersMixin:
         self._restore_conversion_buttons()
         self.log_message(f"External MIDI output folder: {payload['base_dir']}")
         self.log_message(f"Imported working copy: {payload['imported_midi']}")
+        self.log_message(f"Selected Parts MIDI: {payload['selected_parts_midi']}")
         self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
         self.set_status("Processing completed.")
 

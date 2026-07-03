@@ -53,6 +53,10 @@ class YoutubeMidiApp(
     skip_ai_optimizer_var: Any
     skip_pitch_correction_var: Any
     direct_preview_var: Any
+    external_part_range_mode_var: Any
+    external_part_warning_var: Any
+    external_part_selections: dict
+    external_part_tree_items: dict
     always_top_var: Any
     midi_choice_var: Any
     midi_source_var: Any

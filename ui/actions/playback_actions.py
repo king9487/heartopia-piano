@@ -3,7 +3,12 @@ from tkinter import messagebox
 
 import keyboard
 
-from midi_to_keyboard import iter_note_events, midi_note_name, play_midi_as_keyboard
+from midi_to_keyboard import (
+    iter_note_events,
+    midi_note_name,
+    play_midi_as_keyboard,
+    play_original_midi_as_keyboard,
+)
 
 
 class UiPlaybackActionsMixin:
@@ -72,7 +77,15 @@ class UiPlaybackActionsMixin:
     def start_keyboard_playback(self):
         self.start_playback()
 
-    def start_playback(self, start_sec=None, end_sec=None, midi_path=None):
+    def start_playback(
+        self,
+        start_sec=None,
+        end_sec=None,
+        midi_path=None,
+        original_events=False,
+        original_part_filter=None,
+        original_range_mode="keep",
+    ):
         midi_path = midi_path or self.get_selected_midi()
         if not midi_path or self.playing:
             return
@@ -80,15 +93,21 @@ class UiPlaybackActionsMixin:
         try:
             speed = float(self.speed_var.get())
             countdown = int(self.countdown_var.get())
-            chord_delay = int(self.chord_delay_var.get()) / 1000
-            min_hold = int(self.min_hold_var.get()) / 1000
+            if original_events:
+                chord_delay = 0.0
+                min_hold = 0.0
+            else:
+                chord_delay = int(self.chord_delay_var.get()) / 1000
+                min_hold = int(self.min_hold_var.get()) / 1000
         except (TypeError, ValueError):
             messagebox.showerror("Invalid setting", "Playback settings must be numbers.")
             return
 
-        cleanup_settings = self.get_cleanup_settings()
-        if cleanup_settings is None:
-            return
+        cleanup_settings = {}
+        if not original_events:
+            cleanup_settings = self.get_cleanup_settings()
+            if cleanup_settings is None:
+                return
 
         if speed <= 0 or countdown < 1 or chord_delay < 0 or min_hold < 0:
             messagebox.showerror("Invalid setting", "Playback settings are out of range.")
@@ -122,6 +141,9 @@ class UiPlaybackActionsMixin:
                 cleanup_settings,
                 start_sec,
                 end_sec,
+                original_events,
+                original_part_filter,
+                original_range_mode,
             ),
             daemon=True,
         )
@@ -137,21 +159,35 @@ class UiPlaybackActionsMixin:
         cleanup_settings,
         start_sec=None,
         end_sec=None,
+        original_events=False,
+        original_part_filter=None,
+        original_range_mode="keep",
     ):
         try:
             if self.stop_event.wait(countdown):
                 self.queue.put(("play_done", None))
                 return
-            play_midi_as_keyboard(
-                midi_path,
-                speed=speed,
-                stop_event=self.stop_event,
-                chord_delay=chord_delay,
-                min_hold=min_hold,
-                start_sec=start_sec,
-                end_sec=end_sec,
-                **cleanup_settings,
-            )
+            if original_events:
+                play_original_midi_as_keyboard(
+                    midi_path,
+                    speed=speed,
+                    stop_event=self.stop_event,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    part_filter=original_part_filter,
+                    out_of_range_mode=original_range_mode,
+                )
+            else:
+                play_midi_as_keyboard(
+                    midi_path,
+                    speed=speed,
+                    stop_event=self.stop_event,
+                    chord_delay=chord_delay,
+                    min_hold=min_hold,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    **cleanup_settings,
+                )
             self.queue.put(("play_done", None))
         except Exception as exc:
             self.queue.put(("play_error", str(exc)))
