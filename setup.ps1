@@ -70,7 +70,12 @@ if (Test-Path ".venv") {
 
 Invoke-Native -FilePath $python -Arguments @("-m", "venv", ".venv")
 $venvPython = ".\.venv\Scripts\python.exe"
-$pipOptions = @("--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org", "--trusted-host", "download.pytorch.org")
+$pipOptions = @(
+    "--trusted-host", "pypi.org",
+    "--trusted-host", "files.pythonhosted.org",
+    "--trusted-host", "download.pytorch.org",
+    "--trusted-host", "download-r2.pytorch.org"
+)
 Invoke-Native -FilePath $venvPython -Arguments (@("-m", "pip", "install") + $pipOptions + @("--upgrade", "pip"))
 Invoke-Native -FilePath $venvPython -Arguments (@("-m", "pip", "install") + $pipOptions + @("-r", "requirements.txt"))
 

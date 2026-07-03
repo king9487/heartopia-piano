@@ -1,9 +1,21 @@
-yt-dlp
 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Demucs GPU stack. Torch and torchaudio must use matching builds.
 torch==2.3.1+cu121
 torchaudio==2.3.1+cu121
-demucs
-basic-pitch
+demucs==4.0.1
+
+# Basic Pitch 0.4.0 uses TensorFlow by default on Python 3.11. The ONNX GPU
+# runtime is also installed so Basic Pitch's bundled ONNX model is available.
+basic-pitch==0.4.0
+tensorflow==2.15.0
+onnxruntime-gpu
+pretty-midi
+
+# MIDI processing and playback.
 mido
 python-rtmidi
 keyboard
+
+# YouTube ingestion (FFmpeg itself is a separate system dependency).
+yt-dlp

@@ -241,7 +241,9 @@ YouTube or Audio
 
 ## 安裝與執行 Installation
 
-需求：Windows、Python 3.10–3.12（建議 3.11）、FFmpeg／FFprobe，以及 `requirements.txt` 中的套件。預設 PyTorch 套件以 NVIDIA CUDA 12.1 為目標；CPU-only 系統需自行改用相容的 CPU 版本。
+需求：Windows、64-bit Python 3.11、內建於 Python 安裝程式的 Tcl/Tk（Tkinter）、FFmpeg／FFprobe，以及 `requirements.txt` 中的套件。Python 3.11 是目前 Basic Pitch 0.4.0、TensorFlow 2.15.0 與 GPU 套件組合的支援版本。
+
+`requirements.txt` 預設以 NVIDIA CUDA 12.1 安裝相容且版本配對的 PyTorch／torchaudio，並使用 `onnxruntime-gpu`（不與 `onnxruntime` CPU 套件並裝）。CPU-only 系統需將 CUDA 版 `torch`／`torchaudio` 改為 PyTorch 官方相容的 CPU 版本。Pillow、pygame 與 `ffmpeg-python` 目前未被程式使用，因此不列入依賴；FFmpeg 是獨立的系統工具。
 
 安裝 FFmpeg：
 
@@ -253,6 +255,14 @@ winget install --id Gyan.FFmpeg -e --source winget
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+或手動建立乾淨環境：
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 啟動桌面 UI：

@@ -431,6 +431,7 @@ class UiConvertActionsMixin:
                 cancel_token=self.convert_cancel_token,
                 demucs_device=demucs_device,
                 convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
+                progress_callback=lambda message: self.queue.put(("log", message)),
             )
             self._queue_conversion_result(results)
         except CancelledError:
@@ -450,6 +451,7 @@ class UiConvertActionsMixin:
                 cancel_token=self.convert_cancel_token,
                 demucs_device=demucs_device,
                 convert_vocals_midi=bool(self.convert_vocals_midi_var.get()),
+                progress_callback=lambda message: self.queue.put(("log", message)),
             )
             self._queue_conversion_result(results)
         except CancelledError:

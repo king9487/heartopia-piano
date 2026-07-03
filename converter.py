@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import re
 import shutil
+import subprocess
 
 import mido
 
@@ -768,7 +769,38 @@ def separate_vocals(wav_file, output_dir, cancel_token=None, device=None):
     return vocals, no_vocals
 
 
-def convert_audio_to_midi(audio_file, output_dir, cancel_token=None):
+def _report_basic_pitch_message(message, progress_callback=None):
+    print(message)
+    if progress_callback is not None:
+        progress_callback(message)
+
+
+def get_basic_pitch_backend_diagnostics():
+    try:
+        import onnxruntime
+    except Exception as exc:
+        return {
+            "version": "unavailable",
+            "providers": [],
+            "cuda_available": False,
+            "error": str(exc),
+        }
+
+    providers = list(onnxruntime.get_available_providers())
+    return {
+        "version": onnxruntime.__version__,
+        "providers": providers,
+        "cuda_available": "CUDAExecutionProvider" in providers,
+        "error": None,
+    }
+
+
+def convert_audio_to_midi(
+    audio_file,
+    output_dir,
+    cancel_token=None,
+    progress_callback=None,
+):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -777,10 +809,58 @@ def convert_audio_to_midi(audio_file, output_dir, cancel_token=None):
         print("Using existing MIDI:", existing_midi)
         return existing_midi
 
-    run(
-        [find_executable("basic-pitch"), str(output_dir), str(audio_file)],
-        cancel_token=cancel_token,
+    diagnostics = get_basic_pitch_backend_diagnostics()
+    _report_basic_pitch_message(
+        f"ONNX Runtime version: {diagnostics['version']}", progress_callback
     )
+    _report_basic_pitch_message(
+        f"ONNX Runtime available providers: {diagnostics['providers']}",
+        progress_callback,
+    )
+    _report_basic_pitch_message(
+        "CUDAExecutionProvider available: "
+        + ("yes" if diagnostics["cuda_available"] else "no"),
+        progress_callback,
+    )
+
+    basic_pitch = find_executable("basic-pitch")
+    tensorflow_cmd = [basic_pitch, str(output_dir), str(audio_file)]
+    if diagnostics["error"] is not None:
+        _report_basic_pitch_message(
+            f"ONNX backend unavailable: {diagnostics['error']}", progress_callback
+        )
+        _report_basic_pitch_message(
+            "Basic Pitch CLI is using TensorFlow backend.", progress_callback
+        )
+        run(tensorflow_cmd, cancel_token=cancel_token)
+    else:
+        onnx_cmd = [
+            basic_pitch,
+            "--model-serialization",
+            "onnx",
+            str(output_dir),
+            str(audio_file),
+        ]
+        _report_basic_pitch_message(
+            "Basic Pitch backend: ONNX. Basic Pitch 0.4.0 may still import "
+            "TensorFlow during CLI startup.",
+            progress_callback,
+        )
+        _report_basic_pitch_message(
+            "Basic Pitch 0.4.0 uses CPUExecutionProvider for its ONNX session.",
+            progress_callback,
+        )
+        try:
+            run(onnx_cmd, cancel_token=cancel_token)
+        except subprocess.CalledProcessError:
+            _report_basic_pitch_message(
+                "Basic Pitch ONNX backend failed; retrying with TensorFlow fallback.",
+                progress_callback,
+            )
+            _report_basic_pitch_message(
+                "Basic Pitch CLI is using TensorFlow backend.", progress_callback
+            )
+            run(tensorflow_cmd, cancel_token=cancel_token)
 
     midi_file = latest_midi_file(output_dir)
     if not midi_file:
@@ -795,6 +875,7 @@ def youtube_to_midi(
     cancel_token=None,
     demucs_device=None,
     convert_vocals_midi=False,
+    progress_callback=None,
 ):
     base_dir = Path(base_dir) if base_dir else output_dir_for_url(url, cancel_token=cancel_token)
     download_dir = base_dir / "download"
@@ -809,7 +890,10 @@ def youtube_to_midi(
         if convert_vocals_midi and not cached_results.get("vocal_midi"):
             print("Cached output has no vocals MIDI. Converting vocals to MIDI...")
             cached_results["vocal_midi"] = convert_audio_to_midi(
-                cached_results["vocals"], midi_dir / "vocals", cancel_token=cancel_token
+                cached_results["vocals"],
+                midi_dir / "vocals",
+                cancel_token=cancel_token,
+                progress_callback=progress_callback,
             )
         return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
 
@@ -825,13 +909,21 @@ def youtube_to_midi(
     vocal_clean_midi = None
     if convert_vocals_midi:
         print("Step 3: Converting vocals to MIDI...")
-        vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+        vocal_midi = convert_audio_to_midi(
+            vocals,
+            midi_dir / "vocals",
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
 
     print("Step 4: Converting accompaniment to MIDI...")
     accompaniment_midi = convert_audio_to_midi(
-        no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
+        no_vocals,
+        midi_dir / "accompaniment",
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
@@ -901,6 +993,7 @@ def audio_file_to_midi(
     cancel_token=None,
     demucs_device=None,
     convert_vocals_midi=False,
+    progress_callback=None,
 ):
     base_dir = Path(base_dir) if base_dir else output_dir_for_audio_file(audio_file)
     download_dir = base_dir / "download"
@@ -915,7 +1008,10 @@ def audio_file_to_midi(
         if convert_vocals_midi and not cached_results.get("vocal_midi"):
             print("Cached output has no vocals MIDI. Converting vocals to MIDI...")
             cached_results["vocal_midi"] = convert_audio_to_midi(
-                cached_results["vocals"], midi_dir / "vocals", cancel_token=cancel_token
+                cached_results["vocals"],
+                midi_dir / "vocals",
+                cancel_token=cancel_token,
+                progress_callback=progress_callback,
             )
         return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
 
@@ -931,13 +1027,21 @@ def audio_file_to_midi(
     vocal_clean_midi = None
     if convert_vocals_midi:
         print("Step 3: Converting vocals to MIDI...")
-        vocal_midi = convert_audio_to_midi(vocals, midi_dir / "vocals", cancel_token=cancel_token)
+        vocal_midi = convert_audio_to_midi(
+            vocals,
+            midi_dir / "vocals",
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
 
     print("Step 4: Converting accompaniment to MIDI...")
     accompaniment_midi = convert_audio_to_midi(
-        no_vocals, midi_dir / "accompaniment", cancel_token=cancel_token
+        no_vocals,
+        midi_dir / "accompaniment",
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
