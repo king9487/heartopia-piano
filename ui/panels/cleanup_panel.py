@@ -5,7 +5,7 @@ from ui.presets import PROCESSING_PRESETS
 
 
 def build_cleanup_panel(app, parent, start_row=0):
-    controls = ttk.LabelFrame(parent, text="Processing", padding=12)
+    controls = ttk.LabelFrame(parent, text="Presets", padding=12)
     controls.grid(row=start_row, column=0, sticky="new", padx=12, pady=(12, 8))
     ttk.Label(controls, text="Preset").grid(row=0, column=0, sticky="w")
     preset_combo = ttk.Combobox(
@@ -17,19 +17,6 @@ def build_cleanup_panel(app, parent, start_row=0):
     )
     preset_combo.grid(row=0, column=1, sticky="w", padx=(8, 24))
     preset_combo.bind("<<ComboboxSelected>>", app.on_processing_preset_changed)
-    for column, (label, stage) in enumerate(
-        (
-            ("Rebuild Clean", "clean"),
-            ("Rebuild Piano Arranged", "piano_arranged"),
-            ("Rebuild Final", "final"),
-        ),
-        start=2,
-    ):
-        ttk.Button(
-            controls,
-            text=label,
-            command=lambda selected_stage=stage: app.start_rebuild_stage(selected_stage),
-        ).grid(row=0, column=column, sticky="w", padx=(0, 8))
 
     cleanup = ttk.LabelFrame(parent, text="MIDI Cleanup", padding=12)
     cleanup.grid(row=start_row + 1, column=0, sticky="new", padx=12, pady=(0, 8))
@@ -57,8 +44,15 @@ def build_cleanup_panel(app, parent, start_row=0):
     ttk.Checkbutton(
         cleanup, text="Melody only", variable=app.melody_only_var
     ).grid(row=1, column=2, columnspan=2, sticky="w", pady=(0, 8))
+    ttk.Button(
+        cleanup,
+        text="Rebuild Clean",
+        command=lambda: app.start_rebuild_stage("clean"),
+    ).grid(row=2, column=0, columnspan=2, sticky="w")
 
-    arrangement = ttk.LabelFrame(parent, text="Arrangement / Piano Cover", padding=12)
+    arrangement = ttk.LabelFrame(
+        parent, text="Piano Arranger / Arrangement Style", padding=12
+    )
     arrangement.grid(row=start_row + 2, column=0, sticky="new", padx=12, pady=(0, 8))
     ttk.Label(arrangement, text="Melody notes").grid(row=0, column=0, sticky="w")
     ttk.Spinbox(
@@ -80,22 +74,39 @@ def build_cleanup_panel(app, parent, start_row=0):
         state="readonly",
         width=12,
     ).grid(row=1, column=1, sticky="w", padx=(8, 24), pady=(8, 0))
-    ttk.Label(arrangement, text="Optimizer mode").grid(
-        row=1, column=2, sticky="w", pady=(8, 0)
-    )
-    ttk.Combobox(
+    ttk.Button(
         arrangement,
+        text="Rebuild Piano Arranged",
+        command=lambda: app.start_rebuild_stage("piano_arranged"),
+    ).grid(row=1, column=2, columnspan=2, sticky="w", pady=(8, 0))
+
+    ai_optimizer = ttk.LabelFrame(parent, text="AI Optimizer", padding=12)
+    ai_optimizer.grid(row=start_row + 3, column=0, sticky="new", padx=12, pady=(0, 8))
+    ttk.Label(ai_optimizer, text="Optimizer mode").grid(row=0, column=0, sticky="w")
+    ttk.Combobox(
+        ai_optimizer,
         textvariable=app.optimizer_mode_var,
         values=("None", "Rule", "OpenAI"),
         state="readonly",
         width=12,
-    ).grid(row=1, column=3, sticky="w", padx=(8, 24), pady=(8, 0))
+    ).grid(row=0, column=1, sticky="w", padx=(8, 24))
     ttk.Button(
-        arrangement, text="Optimize MIDI", command=app.start_optimize_midi
-    ).grid(row=1, column=4, sticky="w", pady=(8, 0))
+        ai_optimizer, text="Optimize MIDI", command=app.start_optimize_midi
+    ).grid(row=0, column=2, sticky="w")
+
+    pitch = ttk.LabelFrame(parent, text="Pitch Correction", padding=12)
+    pitch.grid(row=start_row + 4, column=0, sticky="new", padx=12, pady=(0, 8))
+    ttk.Label(
+        pitch, text="Pitch correction feeds the final smoothing stage."
+    ).grid(row=0, column=0, sticky="w", padx=(0, 16))
+    ttk.Button(
+        pitch,
+        text="Rebuild Final",
+        command=lambda: app.start_rebuild_stage("final"),
+    ).grid(row=0, column=1, sticky="w")
 
     key_transpose = ttk.LabelFrame(parent, text="Key Transpose", padding=12)
-    key_transpose.grid(row=start_row + 3, column=0, sticky="new", padx=12, pady=(0, 12))
+    key_transpose.grid(row=start_row + 5, column=0, sticky="new", padx=12, pady=(0, 12))
     ttk.Label(key_transpose, text="Original Key").grid(row=0, column=0, sticky="w")
     original_key_combo = ttk.Combobox(
         key_transpose,
@@ -122,4 +133,4 @@ def build_cleanup_panel(app, parent, start_row=0):
     ttk.Label(key_transpose, textvariable=app.key_transpose_status_var).grid(
         row=1, column=2, columnspan=2, sticky="w", pady=(8, 0)
     )
-    return start_row + 4
+    return start_row + 6

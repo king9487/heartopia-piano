@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 
 def build_midi_editor_panel(app, parent, row=3):
-    editor = ttk.Frame(parent, padding=(12, 0, 12, 8))
+    editor = ttk.LabelFrame(parent, text="Editor", padding=(10, 8, 10, 8))
     editor.grid(row=row, column=0, sticky="nsew")
     editor.columnconfigure(0, weight=1)
     editor.rowconfigure(1, weight=1)

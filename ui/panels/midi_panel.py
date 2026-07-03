@@ -1,8 +1,16 @@
 from tkinter import ttk
 
 
-def build_midi_panel(app, parent, row):
-    actions = ttk.Frame(parent, padding=(12, 0, 12, 8))
+def build_main_midi_panel(app, parent, row):
+    current = ttk.LabelFrame(parent, text="Current MIDI", padding=10)
+    current.grid(row=row, column=0, sticky="ew", padx=12, pady=(8, 8))
+    current.columnconfigure(0, weight=1)
+    ttk.Label(current, textvariable=app.selected_midi_var, foreground="#444").grid(
+        row=0, column=0, sticky="ew"
+    )
+
+    actions = ttk.LabelFrame(parent, text="MIDI Actions", padding=10)
+    actions.grid(row=row + 1, column=0, sticky="ew", padx=12, pady=(0, 8))
     actions.grid(row=row, column=0, sticky="ew")
     actions.columnconfigure(6, weight=1)
     ttk.Button(actions, text="Open MIDI", command=app.open_midi).grid(row=0, column=0)
@@ -20,9 +28,12 @@ def build_midi_panel(app, parent, row):
         actions, text="Stop", command=app.stop_current_task, state="disabled"
     )
     app.stop_button.grid(row=0, column=4, padx=(8, 0))
+    return row + 2
 
+
+def build_midi_sources_panel(app, parent, row=0):
     sources = ttk.LabelFrame(parent, text="Current MIDI source / version", padding=10)
-    sources.grid(row=row + 1, column=0, sticky="ew", padx=12, pady=(0, 8))
+    sources.grid(row=row, column=0, sticky="ew", padx=12, pady=(12, 8))
     sources.columnconfigure(3, weight=1)
     ttk.Radiobutton(
         sources, text="Vocals MIDI", value="vocal_midi",
@@ -55,7 +66,7 @@ def build_midi_panel(app, parent, row):
     app.midi_source_combo.bind("<<ComboboxSelected>>", app.on_midi_source_selected)
 
     compare = ttk.LabelFrame(parent, text="A/B Compare", padding=10)
-    compare.grid(row=row + 2, column=0, sticky="ew", padx=12, pady=(0, 8))
+    compare.grid(row=row + 1, column=0, sticky="ew", padx=12, pady=(0, 8))
     compare.columnconfigure(1, weight=1)
     compare.columnconfigure(4, weight=1)
     ttk.Label(compare, text="A source").grid(row=0, column=0, sticky="w")
@@ -90,4 +101,10 @@ def build_midi_panel(app, parent, row):
     ttk.Button(compare, text="Stop", command=app.stop_keyboard_playback).grid(
         row=0, column=8, sticky="w"
     )
-    return row + 3
+    return row + 2
+
+
+def build_midi_panel(app, parent, row):
+    """Backward-compatible combined MIDI panel builder."""
+    next_row = build_main_midi_panel(app, parent, row)
+    return build_midi_sources_panel(app, parent, next_row)

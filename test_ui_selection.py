@@ -20,6 +20,7 @@ class Variable:
 
 class Combo:
     def __init__(self):
+        self.results = None
         self.values = ()
 
     def configure(self, **kwargs):
@@ -45,6 +46,32 @@ class SelectionHarness(MidiSelectionMixin):
 
 
 class MidiSelectionTests(unittest.TestCase):
+    def test_external_import_sources_and_compare_defaults(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            names = {
+                "imported_midi": "imported.mid",
+                "clean_midi": "clean_37key.mid",
+                "piano_arranged_midi": "piano_arranged_37key.mid",
+                "ai_optimized_midi": "ai_optimized_37key.mid",
+                "pitch_corrected_midi": "pitch_corrected_37key.mid",
+                "final_midi": "final_37key.mid",
+            }
+            for filename in names.values():
+                (folder / filename).touch()
+            app = SelectionHarness()
+            app.results = {
+                "input_source": "external_midi",
+                "base_dir": folder,
+                **{key: folder / filename for key, filename in names.items()},
+            }
+            app.update_selected_midi()
+
+            self.assertEqual(app.midi_source_var.get(), "Final")
+            self.assertIn("Imported MIDI", app.available_midi_sources)
+            self.assertEqual(app.compare_a_source_var.get(), "Imported MIDI")
+            self.assertEqual(app.compare_b_source_var.get(), "Piano Arranged")
+
     def test_ab_compare_uses_existing_sources_without_changing_current(self):
         with TemporaryDirectory() as directory:
             folder = Path(directory)

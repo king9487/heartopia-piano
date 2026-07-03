@@ -45,6 +45,14 @@ class YoutubeMidiApp(
     stop_hotkey: Any
 
     url_var: Any
+    input_source_var: Any
+    external_midi_path_var: Any
+    external_midi_info_vars: dict
+    skip_cleanup_var: Any
+    skip_piano_arranger_var: Any
+    skip_ai_optimizer_var: Any
+    skip_pitch_correction_var: Any
+    direct_preview_var: Any
     always_top_var: Any
     midi_choice_var: Any
     midi_source_var: Any
@@ -85,6 +93,8 @@ class YoutubeMidiApp(
     studio_current_time_var: Any
     studio_total_time_var: Any
     studio_status_var: Any
+    studio_view_mode_var: Any
+    staff_selected_note_var: Any
     studio_loaded_path: Any
     studio_events: list
     studio_event_times: list
@@ -102,12 +112,20 @@ class YoutubeMidiApp(
 
     notebook: ttk.Notebook | None
     main_tab: ttk.Frame | None
+    import_tab: ttk.Frame | None
+    optimization_tab: ttk.Frame | None
     playback_tab: ttk.Frame | None
     cleanup_tab: ttk.Frame | None
     studio_tab: ttk.Frame | None
+    analysis_tab: ttk.Frame | None
     log: tk.Text | None
     convert_button: ttk.Button | None
     local_audio_button: ttk.Button | None
+    external_midi_button: ttk.Button | None
+    process_external_midi_button: ttk.Button | None
+    preview_original_midi_button: ttk.Button | None
+    play_original_midi_button: ttk.Button | None
+    open_original_midi_button: ttk.Button | None
     stop_button: ttk.Button | None
     play_button: ttk.Button | None
     midi_source_combo: ttk.Combobox | None
@@ -120,6 +138,9 @@ class YoutubeMidiApp(
     studio_stop_button: ttk.Button | None
     editor_tree: ttk.Treeview | None
     studio_canvas: tk.Canvas | None
+    piano_roll_frame: ttk.Frame | None
+    staff_view_frame: ttk.Frame | None
+    staff_view: Any
 
     def __init__(self, root):
         self.root = root

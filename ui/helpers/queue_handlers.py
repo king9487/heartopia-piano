@@ -20,6 +20,7 @@ class UiQueueHandlersMixin:
             "log": self._handle_log_message,
             "status": self._handle_status_message,
             "converted": self._handle_converted,
+            "external_midi_done": self._handle_external_midi_done,
             "convert_error": self._handle_convert_error,
             "convert_cancelled": self._handle_convert_cancelled,
             "play_done": self._handle_play_done,
@@ -37,6 +38,11 @@ class UiQueueHandlersMixin:
         self.convert_button.configure(state="normal")
         assert self.local_audio_button is not None
         self.local_audio_button.configure(state="normal")
+        if self.external_midi_button is not None:
+            self.external_midi_button.configure(state="normal")
+        if self.process_external_midi_button is not None:
+            state = "normal" if self.external_midi_path_var.get().strip() else "disabled"
+            self.process_external_midi_button.configure(state=state)
         assert self.stop_button is not None
         self.stop_button.configure(state="disabled")
 
@@ -61,6 +67,22 @@ class UiQueueHandlersMixin:
         self.refresh_converted_outputs()
         self._restore_conversion_buttons()
         self.set_status("Conversion finished")
+
+    def _handle_external_midi_done(self, payload):
+        self.results = payload
+        self.converting = False
+        self.convert_cancel_token = None
+        self.show_external_midi_metadata(payload["metadata"])
+        self.update_selected_midi()
+        if self.direct_preview_var.get() and "Final" in self.available_midi_sources:
+            self.midi_source_var.set("Final")
+            self.on_midi_source_selected()
+            self.preview_selected_midi()
+        self._restore_conversion_buttons()
+        self.log_message(f"External MIDI output folder: {payload['base_dir']}")
+        self.log_message(f"Imported working copy: {payload['imported_midi']}")
+        self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
+        self.set_status("Processing completed.")
 
     def _handle_convert_error(self, payload):
         self.converting = False

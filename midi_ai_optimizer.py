@@ -4,7 +4,10 @@ import shutil
 from pathlib import Path
 from urllib import request
 
-from midi_rule_engine import RuleNote, read_midi_notes, write_clean_midi
+from midi_rule_engine import (
+    RuleNote, normalize_tempo_map, read_midi_notes, seconds_to_ticks,
+    ticks_to_seconds, write_clean_midi,
+)
 from midi_piano_arranger import PIANO_ARRANGED_MIDI_NAME, arrange_piano_midi
 from midi_to_keyboard import DEFAULT_NOTE_MAP
 
@@ -58,6 +61,10 @@ def midi_notes_to_dicts(input_midi):
                 "duration_ms": max(1, int(round(note.duration * 1000))),
                 "note": int(note.note),
                 "velocity": int(note.velocity),
+                "start_tick": note.start_tick,
+                "end_tick": note.end_tick,
+                "ppq": note.ppq,
+                "tempo_map": [list(entry) for entry in note.tempo_map],
             }
         )
     return notes
@@ -69,10 +76,35 @@ def dicts_to_rule_notes(notes):
         start = int(note["start_ms"]) / 1000
         duration = int(note["duration_ms"]) / 1000
         midi_note = int(note["note"])
+        ppq = int(note.get("ppq", 480))
+        tempo_map = normalize_tempo_map(note.get("tempo_map"))
+        source_start_tick = note.get("start_tick")
+        source_end_tick = note.get("end_tick")
+        preserve_start = source_start_tick is not None and abs(
+            ticks_to_seconds(source_start_tick, ppq, tempo_map) - start
+        ) <= 0.0005
+        preserve_end = preserve_start and source_end_tick is not None and abs(
+            (
+                ticks_to_seconds(source_end_tick, ppq, tempo_map)
+                - ticks_to_seconds(source_start_tick, ppq, tempo_map)
+            ) - duration
+        ) <= 0.0005
+        start_tick = (
+            int(source_start_tick)
+            if preserve_start
+            else seconds_to_ticks(start, ppq, tempo_map)
+        )
+        end_tick = (
+            int(source_end_tick)
+            if preserve_end
+            else seconds_to_ticks(start + duration, ppq, tempo_map)
+        )
         rule_notes.append(
             RuleNote(
-                start=start,
-                end=start + duration,
+                start_tick=start_tick,
+                end_tick=max(start_tick + 1, end_tick),
+                ppq=ppq,
+                tempo_map=tempo_map,
                 original_note=midi_note,
                 note=midi_note,
                 velocity=int(note["velocity"]),
@@ -132,14 +164,18 @@ def validate_note_dicts(notes, note_map=None):
     for note in notes:
         if not isinstance(note, dict) or not is_valid_note_dict(note, lowest, highest):
             raise ValueError("AI output contains invalid notes")
-        validated.append(
-            {
+        validated_note = {
                 "start_ms": int(note["start_ms"]),
                 "duration_ms": int(note["duration_ms"]),
                 "note": int(note["note"]),
                 "velocity": int(note["velocity"]),
             }
-        )
+        for timing_key in (
+            "start_tick", "end_tick", "ppq", "tempo_map", "timing_changes"
+        ):
+            if timing_key in note:
+                validated_note[timing_key] = note[timing_key]
+        validated.append(validated_note)
 
     return sorted(validated, key=lambda item: (item["start_ms"], item["note"]))
 
@@ -319,6 +355,8 @@ def arrange_piano_cover_notes(notes, note_map=None, options=None):
             active_melody = RuleNote(
                 start=melody_source.start,
                 end=melody_source.end,
+                ppq=melody_source.ppq,
+                tempo_map=melody_source.tempo_map,
                 original_note=melody_source.original_note,
                 note=pitch,
                 velocity=min(127, melody_source.velocity + 8),
@@ -380,6 +418,8 @@ def arrange_piano_cover_notes(notes, note_map=None, options=None):
                 RuleNote(
                     start=group_start,
                     end=end,
+                    ppq=note.ppq,
+                    tempo_map=note.tempo_map,
                     original_note=note.original_note,
                     note=pitch,
                     velocity=max(1, min(note.velocity, active_melody.velocity - 8)),
@@ -431,6 +471,8 @@ def arrange_melody_only_notes(notes, note_map=None, options=None):
         active_melody = RuleNote(
             start=top.start,
             end=top.end,
+            ppq=top.ppq,
+            tempo_map=top.tempo_map,
             original_note=top.original_note,
             note=pitch,
             velocity=min(127, top.velocity + 8),
@@ -534,7 +576,27 @@ def optimize_chunk(notes, options):
     mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
     if mode == OPTIMIZER_OPENAI:
         try:
-            return validate_note_dicts(optimize_notes_with_openai(notes, options))
+            optimized = validate_note_dicts(optimize_notes_with_openai(notes, options))
+            # The model-facing schema historically omitted tick metadata. When
+            # start/duration are unchanged, reattach the source tick identity;
+            # a changed start_ms remains an explicit model timing edit.
+            timing_by_ms = {}
+            for source_note in notes:
+                timing_by_ms.setdefault(
+                    (source_note["start_ms"], source_note["duration_ms"]), []
+                ).append(source_note)
+            for optimized_note in optimized:
+                if "start_tick" in optimized_note:
+                    continue
+                matches = timing_by_ms.get(
+                    (optimized_note["start_ms"], optimized_note["duration_ms"]), []
+                )
+                if matches:
+                    source_note = matches.pop(0)
+                    for key in ("start_tick", "end_tick", "ppq", "tempo_map"):
+                        if key in source_note:
+                            optimized_note[key] = source_note[key]
+            return optimized
         except Exception:
             return optimize_notes_with_rules(notes, options)
 
@@ -692,6 +754,7 @@ def detect_key_for_midi(input_midi):
 
 
 def smooth_note_events(notes, options=None):
+    """Quantize final timing and annotate every deliberate start-time change."""
     options = options or {}
     min_duration_ms = max(20, int(options.get("final_min_duration_ms", 45)))
     quantize_ms = max(1, int(options.get("final_quantize_ms", 10)))
@@ -700,24 +763,35 @@ def smooth_note_events(notes, options=None):
     smoothed = []
     last_end_by_note = {}
     for note in sorted(notes, key=lambda item: (item["start_ms"], item["note"])):
-        start_ms = int(round(note["start_ms"] / quantize_ms) * quantize_ms)
+        original_start_ms = int(note["start_ms"])
+        start_ms = int(round(original_start_ms / quantize_ms) * quantize_ms)
         duration_ms = max(min_duration_ms, int(round(note["duration_ms"] / quantize_ms) * quantize_ms))
         midi_note = note["note"]
 
         previous_end = last_end_by_note.get(midi_note)
+        timing_changes = []
+        if start_ms != original_start_ms:
+            timing_changes.append(
+                f"quantized start {original_start_ms}ms -> {start_ms}ms"
+            )
         if previous_end is not None and start_ms < previous_end:
+            before_overlap_shift = start_ms
             start_ms = previous_end
+            timing_changes.append(
+                f"same-pitch overlap shift {before_overlap_shift}ms -> {start_ms}ms"
+            )
 
         end_ms = start_ms + duration_ms
         last_end_by_note[midi_note] = end_ms
-        smoothed.append(
-            {
-                "start_ms": start_ms,
-                "duration_ms": duration_ms,
-                "note": midi_note,
-                "velocity": note["velocity"],
-            }
+        smoothed_note = dict(note)
+        smoothed_note.update(
+            start_ms=start_ms,
+            duration_ms=duration_ms,
+            note=midi_note,
+            velocity=note["velocity"],
+            timing_changes=timing_changes,
         )
+        smoothed.append(smoothed_note)
 
     return validate_note_dicts(smoothed)
 

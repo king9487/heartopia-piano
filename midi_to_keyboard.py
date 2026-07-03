@@ -377,12 +377,14 @@ def write_clean_midi(note_events, output_midi, quantize_ms=None):
 
     timed_messages.sort(key=lambda item: (item[0], item[1]))
 
-    previous_time = 0.0
+    emitted_tick = 0
     for timestamp, _, message in timed_messages:
-        delta_seconds = max(0.0, timestamp - previous_time)
-        message.time = int(round(mido.second2tick(delta_seconds, ticks_per_beat, tempo)))
+        absolute_tick = int(
+            round(mido.second2tick(max(0.0, timestamp), ticks_per_beat, tempo))
+        )
+        message.time = max(0, absolute_tick - emitted_tick)
         track.append(message)
-        previous_time = timestamp
+        emitted_tick = absolute_tick
 
     track.append(mido.MetaMessage("end_of_track", time=0))
     midi.save(output_midi)

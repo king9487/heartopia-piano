@@ -144,7 +144,8 @@ def arrange_piano_notes(notes, note_map=None, options=None):
     harmony_simplified = 0
 
     for index, group in enumerate(groups):
-        start = min(note.start for note in group)
+        group_start_note = min(group, key=lambda note: note.start_tick)
+        start = group_start_note.start
         next_start = (
             min(note.start for note in groups[index + 1])
             if index + 1 < len(groups)
@@ -177,10 +178,15 @@ def arrange_piano_notes(notes, note_map=None, options=None):
                 bool(options["melody_octave_up"]),
             )
             if active_melody and active_melody.note.end > start:
-                active_melody.note.end = max(active_melody.note.start + 0.001, start)
+                active_melody.note.end_tick = max(
+                    active_melody.note.start_tick + 1,
+                    group_start_note.start_tick,
+                )
             melody_note = RuleNote(
-                start=melody_source.start,
-                end=melody_source.end,
+                start_tick=melody_source.start_tick,
+                end_tick=melody_source.end_tick,
+                ppq=melody_source.ppq,
+                tempo_map=melody_source.tempo_map,
                 original_note=melody_source.note,
                 note=melody_pitch,
                 velocity=min(127, melody_source.velocity + 8),
@@ -245,16 +251,19 @@ def arrange_piano_notes(notes, note_map=None, options=None):
                     break
 
         for source_note, pitch, role in chosen:
-            end = min(source_note.end, active_melody.note.end)
+            end_tick = min(source_note.end_tick, active_melody.note.end_tick)
             if next_start is not None:
-                end = min(end, next_start)
-            if end <= start:
+                next_note = min(groups[index + 1], key=lambda note: note.start_tick)
+                end_tick = min(end_tick, next_note.start_tick)
+            if end_tick <= group_start_note.start_tick:
                 continue
             selected.append(
                 ArrangedEvent(
                     RuleNote(
-                        start=start,
-                        end=end,
+                        start_tick=group_start_note.start_tick,
+                        end_tick=end_tick,
+                        ppq=group_start_note.ppq,
+                        tempo_map=group_start_note.tempo_map,
                         original_note=source_note.note,
                         note=pitch,
                         velocity=max(
@@ -312,7 +321,7 @@ def arrange_piano_midi(input_midi, output_midi=None, options=None, report_path=N
     write_clean_midi(
         notes,
         output_midi,
-        quantize_ms=(options or {}).get("final_quantize_ms", 10),
+        quantize_ms=(options or {}).get("final_quantize_ms"),
     )
     report_path.write_text(
         json.dumps(statistics, indent=2, ensure_ascii=False), encoding="utf-8"

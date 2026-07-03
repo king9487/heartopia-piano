@@ -26,18 +26,110 @@ DEFAULT_37KEY_CLEAN_OPTIONS = {
 WINDOW_MS = 30
 
 
-@dataclass
+DEFAULT_PPQ = 480
+DEFAULT_TEMPO = 500000
+
+
+def normalize_tempo_map(tempo_map=None):
+    entries = {int(tick): int(tempo) for tick, tempo in (tempo_map or ())}
+    entries.setdefault(0, DEFAULT_TEMPO)
+    return tuple(sorted(entries.items()))
+
+
+def ticks_to_seconds(tick, ppq, tempo_map):
+    target = max(0, int(tick))
+    previous_tick = 0
+    tempo = DEFAULT_TEMPO
+    seconds = 0.0
+    for change_tick, change_tempo in normalize_tempo_map(tempo_map):
+        if change_tick > target:
+            break
+        seconds += mido.tick2second(change_tick - previous_tick, ppq, tempo)
+        previous_tick = change_tick
+        tempo = change_tempo
+    return seconds + mido.tick2second(target - previous_tick, ppq, tempo)
+
+
+def seconds_to_ticks(seconds, ppq, tempo_map):
+    remaining = max(0.0, float(seconds))
+    previous_tick = 0
+    tempo = DEFAULT_TEMPO
+    for change_tick, change_tempo in normalize_tempo_map(tempo_map):
+        segment_seconds = mido.tick2second(change_tick - previous_tick, ppq, tempo)
+        if remaining < segment_seconds:
+            return previous_tick + int(round(mido.second2tick(remaining, ppq, tempo)))
+        remaining -= segment_seconds
+        previous_tick = change_tick
+        tempo = change_tempo
+    return previous_tick + int(round(mido.second2tick(remaining, ppq, tempo)))
+
+
+@dataclass(init=False)
 class RuleNote:
-    start: float
-    end: float
+    start_tick: int
+    end_tick: int
     original_note: int
     note: int
     velocity: int
-    octave_shift: int = 0
+    octave_shift: int
+    ppq: int
+    tempo_map: tuple
+
+    def __init__(
+        self, start=None, end=None, original_note=0, note=0, velocity=64,
+        octave_shift=0, *, start_tick=None, end_tick=None, ppq=DEFAULT_PPQ,
+        tempo_map=None,
+    ):
+        self.ppq = max(1, int(ppq))
+        self.tempo_map = normalize_tempo_map(tempo_map)
+        self.start_tick = (
+            max(0, int(start_tick))
+            if start_tick is not None
+            else seconds_to_ticks(start or 0.0, self.ppq, self.tempo_map)
+        )
+        self.end_tick = (
+            max(self.start_tick + 1, int(end_tick))
+            if end_tick is not None
+            else max(
+                self.start_tick + 1,
+                seconds_to_ticks(end if end is not None else start or 0.0, self.ppq, self.tempo_map),
+            )
+        )
+        self.original_note = int(original_note)
+        self.note = int(note)
+        self.velocity = int(velocity)
+        self.octave_shift = int(octave_shift)
+
+    @property
+    def start(self):
+        return ticks_to_seconds(self.start_tick, self.ppq, self.tempo_map)
+
+    @start.setter
+    def start(self, value):
+        self.start_tick = seconds_to_ticks(value, self.ppq, self.tempo_map)
+
+    @property
+    def end(self):
+        return ticks_to_seconds(self.end_tick, self.ppq, self.tempo_map)
+
+    @end.setter
+    def end(self, value):
+        self.end_tick = max(
+            self.start_tick + 1,
+            seconds_to_ticks(value, self.ppq, self.tempo_map),
+        )
 
     @property
     def duration(self):
         return self.end - self.start
+
+    @property
+    def start_ms(self):
+        return self.start * 1000
+
+    @property
+    def end_ms(self):
+        return self.end * 1000
 
     @property
     def duration_ms(self):
@@ -67,27 +159,40 @@ def distance_from_range(note, lowest, highest):
 
 def read_midi_notes(input_midi):
     midi = mido.MidiFile(input_midi)
-    current_time = 0.0
+    merged = mido.merge_tracks(midi.tracks)
+    absolute_tick = 0
+    tempo_entries = []
+    for message in merged:
+        absolute_tick += message.time
+        if message.type == "set_tempo":
+            tempo_entries.append((absolute_tick, message.tempo))
+    tempo_map = normalize_tempo_map(tempo_entries)
+
+    absolute_tick = 0
     active_notes = {}
     notes = []
 
-    for message in midi:
-        current_time += message.time
+    for message in merged:
+        absolute_tick += message.time
 
         if message.type == "note_on" and message.velocity > 0:
-            active_notes.setdefault(message.note, []).append((current_time, message.velocity))
+            key = (getattr(message, "channel", 0), message.note)
+            active_notes.setdefault(key, []).append((absolute_tick, message.velocity))
         elif is_note_off(message):
-            starts = active_notes.get(message.note)
+            key = (getattr(message, "channel", 0), message.note)
+            starts = active_notes.get(key)
             if not starts:
                 continue
-            start_time, velocity = starts.pop(0)
+            start_tick, velocity = starts.pop(0)
             if not starts:
-                active_notes.pop(message.note, None)
-            if current_time > start_time:
+                active_notes.pop(key, None)
+            if absolute_tick > start_tick:
                 notes.append(
                     RuleNote(
-                        start=start_time,
-                        end=current_time,
+                        start_tick=start_tick,
+                        end_tick=absolute_tick,
+                        ppq=midi.ticks_per_beat,
+                        tempo_map=tempo_map,
                         original_note=message.note,
                         note=message.note,
                         velocity=velocity,
@@ -158,8 +263,10 @@ def fit_notes_into_range(notes, note_map, out_of_range_mode):
             continue
         fitted_notes.append(
             RuleNote(
-                start=note.start,
-                end=note.end,
+                start_tick=note.start_tick,
+                end_tick=note.end_tick,
+                ppq=note.ppq,
+                tempo_map=note.tempo_map,
                 original_note=note.original_note,
                 note=fitted_note,
                 velocity=note.velocity,
@@ -223,37 +330,51 @@ def write_clean_midi(notes, output_midi, quantize_ms=None):
     output_midi = Path(output_midi)
     output_midi.parent.mkdir(parents=True, exist_ok=True)
 
-    ticks_per_beat = 480
-    tempo = mido.bpm2tempo(120)
+    notes = list(notes)
+    ticks_per_beat = notes[0].ppq if notes else DEFAULT_PPQ
+    tempo_map = notes[0].tempo_map if notes else normalize_tempo_map()
     midi = mido.MidiFile(ticks_per_beat=ticks_per_beat)
     track = mido.MidiTrack()
     midi.tracks.append(track)
-    track.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
 
     timed_messages = []
-    min_duration = (max(1, int(quantize_ms)) / 1000) if quantize_ms else 0.001
+    for tick, tempo in tempo_map:
+        timed_messages.append(
+            (tick, 0, mido.MetaMessage("set_tempo", tempo=tempo, time=0))
+        )
+
     for note in notes:
-        start = max(0.0, quantize_seconds(note.start, quantize_ms))
-        end = max(0.0, quantize_seconds(note.end, quantize_ms))
-        if end <= start:
-            end = start + min_duration
+        if (
+            not quantize_ms
+            and note.ppq == ticks_per_beat
+            and note.tempo_map == tempo_map
+        ):
+            start_tick = note.start_tick
+            end_tick = note.end_tick
+        else:
+            start = quantize_seconds(note.start, quantize_ms)
+            end = quantize_seconds(note.end, quantize_ms)
+            start_tick = seconds_to_ticks(start, ticks_per_beat, tempo_map)
+            end_tick = max(
+                start_tick + 1,
+                seconds_to_ticks(end, ticks_per_beat, tempo_map),
+            )
 
         velocity = max(1, min(int(note.velocity), 127))
         timed_messages.append(
-            (start, 1, mido.Message("note_on", note=note.note, velocity=velocity))
+            (start_tick, 2, mido.Message("note_on", note=note.note, velocity=velocity))
         )
         timed_messages.append(
-            (end, 0, mido.Message("note_off", note=note.note, velocity=0))
+            (end_tick, 1, mido.Message("note_off", note=note.note, velocity=0))
         )
 
     timed_messages.sort(key=lambda item: (item[0], item[1]))
 
-    previous_time = 0.0
-    for timestamp, _, message in timed_messages:
-        delta_seconds = max(0.0, timestamp - previous_time)
-        message.time = int(round(mido.second2tick(delta_seconds, ticks_per_beat, tempo)))
+    emitted_tick = 0
+    for absolute_tick, _, message in timed_messages:
+        message.time = max(0, int(absolute_tick) - emitted_tick)
         track.append(message)
-        previous_time = timestamp
+        emitted_tick = int(absolute_tick)
 
     track.append(mido.MetaMessage("end_of_track", time=0))
     midi.save(output_midi)

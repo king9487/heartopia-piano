@@ -1,6 +1,9 @@
 from pathlib import Path
 import json
 import re
+import shutil
+
+import mido
 
 from midi_ai_optimizer import (
     AI_OPTIMIZED_MIDI_NAME,
@@ -11,6 +14,7 @@ from midi_ai_optimizer import (
     pitch_correct_37key_midi,
     post_process_37key_midi,
     smooth_37key_midi,
+    optimize_37key_midi,
 )
 from midi_rule_engine import DEFAULT_37KEY_CLEAN_OPTIONS, convert_to_37key_midi
 from midi_analysis import (
@@ -18,10 +22,12 @@ from midi_analysis import (
     build_midi_analysis_report,
     export_midi_analysis_report,
     load_midi_analysis_report,
+    inspect_midi_file,
 )
 from midi_piano_arranger import (
     PIANO_ARRANGED_MIDI_NAME,
     PIANO_ARRANGEMENT_REPORT_NAME,
+    arrange_piano_midi,
 )
 from tools import find_executable, find_ffmpeg_location, run, run_capture
 
@@ -84,6 +90,142 @@ def output_dir_for_audio_file(audio_file, output_root="output"):
     audio_file = Path(audio_file)
     folder_name = sanitize_filename(f"{audio_file.stem}_local")
     return Path(output_root) / folder_name
+
+
+def output_dir_for_midi_file(midi_file, output_root="output"):
+    midi_file = Path(midi_file)
+    return Path(output_root) / sanitize_filename(f"{midi_file.stem}_midi")
+
+
+def import_external_midi(
+    midi_file, output_root="output", options=None, skips=None, progress_callback=None
+):
+    """Copy and process an arbitrary MIDI through the Heartopia MIDI stages."""
+    report_progress = progress_callback or (lambda message: None)
+    source = Path(midi_file)
+    if source.suffix.lower() not in {".mid", ".midi"}:
+        raise ValueError("External MIDI must use the .mid or .midi extension")
+    if not source.is_file():
+        raise FileNotFoundError(source)
+
+    # Parse before copying so malformed files fail without leaving a partial job.
+    report_progress("Reading imported MIDI...")
+    metadata = inspect_midi_file(source)
+    base_dir = output_dir_for_midi_file(source, output_root=output_root)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    imported_midi = base_dir / "imported.mid"
+    report_progress("Creating MIDI working copy...")
+    if source.resolve() != imported_midi.resolve():
+        shutil.copy2(source, imported_midi)
+    working_midi = mido.MidiFile(imported_midi)
+    if working_midi.type == 2:
+        # The existing pipeline consumes a single synchronous performance.
+        # Combine type-2 sequences only in the working copy, starting each at 0.
+        normalized = mido.MidiFile(type=1, ticks_per_beat=working_midi.ticks_per_beat)
+        for track in working_midi.tracks:
+            normalized.tracks.append(mido.MidiTrack(message.copy() for message in track))
+        normalized.save(imported_midi)
+
+    options = dict(options or {})
+    skips = dict(skips or {})
+    clean_midi = base_dir / CLEAN_37KEY_MIDI_NAME
+    arranged_midi = base_dir / PIANO_ARRANGED_MIDI_NAME
+    ai_midi = base_dir / AI_OPTIMIZED_MIDI_NAME
+    pitch_midi = base_dir / PITCH_CORRECTED_MIDI_NAME
+    final_midi = base_dir / FINAL_37KEY_MIDI_NAME
+
+    if skips.get("cleanup"):
+        report_progress("Cleanup skipped; creating clean_37key.mid pass-through.")
+        shutil.copyfile(imported_midi, clean_midi)
+    else:
+        report_progress("Running Cleanup...")
+        convert_to_37key_midi(imported_midi, clean_midi, options=options)
+
+    arrangement_statistics = {}
+    arrangement_report = base_dir / PIANO_ARRANGEMENT_REPORT_NAME
+    if skips.get("piano_arranger"):
+        report_progress(
+            "Piano Arranger skipped; creating piano_arranged_37key.mid pass-through."
+        )
+        shutil.copyfile(clean_midi, arranged_midi)
+        if arrangement_report.exists():
+            arrangement_report.unlink()
+    else:
+        report_progress("Running Piano Arranger...")
+        arranged = arrange_piano_midi(
+            clean_midi,
+            output_midi=arranged_midi,
+            options=options,
+            report_path=arrangement_report,
+        )
+        arrangement_statistics = arranged["statistics"]
+
+    if skips.get("ai_optimizer"):
+        report_progress(
+            "AI Optimizer skipped; creating ai_optimized_37key.mid pass-through."
+        )
+        shutil.copyfile(arranged_midi, ai_midi)
+    else:
+        report_progress("Running AI Optimizer...")
+        optimizer_input = arranged_midi
+        if inspect_midi_file(arranged_midi)["notes_outside_map"]:
+            # Cleanup is independently skippable, but the 37-key optimizer has
+            # a strict input contract. Normalize only at this stage when an
+            # earlier pass-through left unsupported pitches in the stream.
+            convert_to_37key_midi(arranged_midi, ai_midi, options=options)
+            optimizer_input = ai_midi
+        optimize_37key_midi(optimizer_input, output_midi=ai_midi, options=options)
+
+    if skips.get("pitch_correction"):
+        report_progress(
+            "Pitch Correction skipped; creating pitch_corrected_37key.mid pass-through."
+        )
+        shutil.copyfile(ai_midi, pitch_midi)
+        detected_key = metadata["key"]
+    else:
+        report_progress("Running Pitch Correction...")
+        pitch_input = ai_midi
+        if inspect_midi_file(ai_midi)["notes_outside_map"]:
+            convert_to_37key_midi(ai_midi, pitch_midi, options=options)
+            pitch_input = pitch_midi
+        _, key_info = pitch_correct_37key_midi(
+            pitch_input, output_midi=pitch_midi, options=options
+        )
+        detected_key = key_info["name"]
+
+    report_progress("Generating final_37key.mid...")
+    final_input = pitch_midi
+    if inspect_midi_file(pitch_midi)["notes_outside_map"]:
+        convert_to_37key_midi(pitch_midi, final_midi, options=options)
+        final_input = final_midi
+    smooth_37key_midi(final_input, output_midi=final_midi, options=options)
+    analysis_report = build_midi_analysis_report(
+        imported_midi,
+        clean_midi,
+        arranged_midi,
+        final_midi,
+        detected_key,
+        arrangement_statistics=arrangement_statistics,
+    )
+    report_path = export_midi_analysis_report(
+        analysis_report, base_dir / MIDI_ANALYSIS_REPORT_NAME
+    )
+    report_progress("All MIDI processing stages completed.")
+    return {
+        "input_source": "external_midi",
+        "base_dir": base_dir,
+        "source_midi": source,
+        "imported_midi": imported_midi,
+        "clean_midi": clean_midi,
+        "piano_arranged_midi": arranged_midi,
+        "ai_optimized_midi": ai_midi,
+        "pitch_corrected_midi": pitch_midi,
+        "final_midi": final_midi,
+        "report_path": report_path,
+        "analysis_report": analysis_report,
+        "metadata": metadata,
+        "skips": skips,
+    }
 
 
 def latest_midi_file(output_dir, include_clean=False):

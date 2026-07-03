@@ -17,6 +17,21 @@ def initialize_app_state(app):
     app.stop_hotkey = None
 
     app.url_var = tk.StringVar()
+    app.input_source_var = tk.StringVar(value="youtube")
+    app.external_midi_path_var = tk.StringVar()
+    app.skip_cleanup_var = tk.BooleanVar(value=False)
+    app.skip_piano_arranger_var = tk.BooleanVar(value=False)
+    app.skip_ai_optimizer_var = tk.BooleanVar(value=False)
+    app.skip_pitch_correction_var = tk.BooleanVar(value=False)
+    app.direct_preview_var = tk.BooleanVar(value=False)
+    app.external_midi_info_vars = {
+        key: tk.StringVar(value="--")
+        for key in (
+            "file_name", "duration", "bpm", "key", "ppq", "tracks",
+            "total_notes", "notes_inside_map", "notes_outside_map",
+            "playable_percentage", "recommended",
+        )
+    }
     app.always_top_var = tk.BooleanVar(value=True)
     app.midi_choice_var = tk.StringVar(value="accompaniment_midi")
     app.midi_source_var = tk.StringVar()
@@ -58,6 +73,8 @@ def initialize_app_state(app):
     app.studio_current_time_var = tk.StringVar(value="00:00.000")
     app.studio_total_time_var = tk.StringVar(value="00:00.000")
     app.studio_status_var = tk.StringVar(value="No MIDI loaded")
+    app.studio_view_mode_var = tk.StringVar(value="Piano Roll")
+    app.staff_selected_note_var = tk.StringVar(value="No staff note selected")
 
     app.studio_loaded_path = None
     app.studio_events = []
@@ -77,12 +94,23 @@ def initialize_app_state(app):
     # Widgets are populated by the panel builders.
     app.notebook = None
     app.main_tab = None
+    app.import_tab = None
+    app.optimization_tab = None
     app.playback_tab = None
     app.cleanup_tab = None
     app.studio_tab = None
+    app.analysis_tab = None
     app.log = None
     app.convert_button = None
     app.local_audio_button = None
+    app.external_midi_button = None
+    app.process_external_midi_button = None
+    app.preview_original_midi_button = None
+    app.play_original_midi_button = None
+    app.open_original_midi_button = None
+    app.youtube_input_frame = None
+    app.local_audio_input_frame = None
+    app.external_midi_input_frame = None
     app.stop_button = None
     app.play_button = None
     app.midi_source_combo = None
@@ -95,3 +123,6 @@ def initialize_app_state(app):
     app.studio_stop_button = None
     app.editor_tree = None
     app.studio_canvas = None
+    app.piano_roll_frame = None
+    app.staff_view_frame = None
+    app.staff_view = None

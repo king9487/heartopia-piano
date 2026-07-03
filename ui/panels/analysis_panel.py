@@ -1,27 +1,39 @@
 from tkinter import ttk
 
-from midi_analysis import ANALYSIS_FIELDS
-
-
 def build_analysis_panel(app, parent, row):
-    panel = ttk.LabelFrame(parent, text="MIDI Analysis", padding=10)
-    panel.grid(row=row, column=0, sticky="ew", padx=12, pady=(0, 8))
-    panel.columnconfigure(1, weight=1)
-    panel.columnconfigure(3, weight=1)
+    parent.columnconfigure(0, weight=1)
+    parent.columnconfigure(1, weight=1)
 
-    midpoint = (len(ANALYSIS_FIELDS) + 1) // 2
-    for index, field in enumerate(ANALYSIS_FIELDS):
-        column_group = 0 if index < midpoint else 1
-        local_row = index if column_group == 0 else index - midpoint
-        label_column = column_group * 2
-        ttk.Label(panel, text=field).grid(
-            row=local_row, column=label_column, sticky="w", pady=2
+    groups = (
+        ("Song Information", ("Song Duration", "Tempo", "Detected Key")),
+        ("MIDI Statistics", ("Total Notes", "Raw Notes")),
+        (
+            "Conversion Report",
+            ("Clean Notes", "Piano Arranged Notes", "Final Notes"),
+        ),
+        (
+            "Note Statistics",
+            (
+                "Removed Notes", "Merged Notes", "Octave Shifted",
+                "Bass Removed", "Harmony Simplified", "Melody Selected",
+            ),
+        ),
+    )
+    for index, (title, fields) in enumerate(groups):
+        group = ttk.LabelFrame(parent, text=title, padding=12)
+        group.grid(
+            row=row + (index // 2),
+            column=index % 2,
+            sticky="nsew",
+            padx=(12 if index % 2 == 0 else 6, 6 if index % 2 == 0 else 12),
+            pady=(12 if index < 2 else 0, 8),
         )
-        ttk.Label(panel, textvariable=app.analysis_vars[field]).grid(
-            row=local_row,
-            column=label_column + 1,
-            sticky="w",
-            padx=(8, 28),
-            pady=2,
-        )
-    return row + 1
+        group.columnconfigure(1, weight=1)
+        for field_row, field in enumerate(fields):
+            ttk.Label(group, text=field).grid(
+                row=field_row, column=0, sticky="w", pady=3
+            )
+            ttk.Label(group, textvariable=app.analysis_vars[field]).grid(
+                row=field_row, column=1, sticky="w", padx=(12, 0), pady=3
+            )
+    return row + 2

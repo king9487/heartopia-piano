@@ -16,24 +16,35 @@ from ui.helpers.analysis import clear_analysis_panel, update_analysis_from_midi_
 
 MIDI_SOURCE_PRIORITY = (
     "Edited MIDI",
+    "Edited",
     "Final 37-Key MIDI",
+    "Final",
     "Piano Arranged MIDI",
+    "Piano Arranged",
     "Piano Cover MIDI",
     "Pitch Corrected MIDI",
     "AI Optimized MIDI",
     "Clean 37-Key MIDI",
+    "Clean",
+    "Imported MIDI",
     "Raw MIDI",
     "Transposed MIDI",
 )
 COMPARE_SOURCE_PRIORITY = (
+    "Imported MIDI",
+    "Imported",
     "Raw MIDI",
+    "Clean",
     "Clean 37-Key MIDI",
     "Piano Arranged MIDI",
+    "Piano Arranged",
     "Piano Cover MIDI",
     "AI Optimized MIDI",
     "Pitch Corrected MIDI",
     "Final 37-Key MIDI",
+    "Final",
     "Edited MIDI",
+    "Edited",
 )
 MIDI_SOURCE_FILENAMES = {
     "Transposed MIDI": TRANSPOSED_MIDI_NAME,
@@ -109,7 +120,11 @@ class MidiSelectionMixin:
         current_b = self.compare_b_source_var.get()
         if current_a not in available:
             preferred_a = next(
-                (label for label in ("Clean 37-Key MIDI", "Raw MIDI") if label in available),
+                (
+                    label
+                    for label in ("Imported MIDI", "Clean", "Clean 37-Key MIDI", "Raw MIDI")
+                    if label in available
+                ),
                 labels[0] if labels else "",
             )
             self.compare_a_source_var.set(preferred_a)
@@ -119,8 +134,10 @@ class MidiSelectionMixin:
                     label
                     for label in (
                         "Piano Arranged MIDI",
+                        "Piano Arranged",
                         "Piano Cover MIDI",
                         "Final 37-Key MIDI",
+                        "Final",
                     )
                     if label in available
                 ),
@@ -149,6 +166,24 @@ class MidiSelectionMixin:
     def collect_result_midi_sources(self):
         if not self.results:
             return {}
+
+        if self.results.get("input_source") == "external_midi":
+            sources = {
+                "Imported MIDI": (
+                    self.results.get("source_midi")
+                    or self.results.get("imported_midi")
+                ),
+                "Clean": self.results.get("clean_midi"),
+                "Piano Arranged": self.results.get("piano_arranged_midi"),
+                "AI Optimized MIDI": self.results.get("ai_optimized_midi"),
+                "Pitch Corrected MIDI": self.results.get("pitch_corrected_midi"),
+                "Final": self.results.get("final_midi"),
+            }
+            if self.results.get("base_dir"):
+                sources["Edited"] = (
+                    Path(self.results["base_dir"]) / EDITED_37KEY_MIDI_NAME
+                )
+            return sources
 
         raw_key = self.midi_choice_var.get()
         if not self.results.get(raw_key) and raw_key == "vocal_midi":

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ui.panels.midi_editor_panel import build_midi_editor_panel
+from ui.panels.staff_view import StaffViewCanvas
 
 
 def build_studio_panel(app, parent):
@@ -52,7 +53,7 @@ def build_studio_panel(app, parent):
     app.studio_seek.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
 
     range_tools = ttk.LabelFrame(
-        parent, text="Range tools", padding=(10, 6, 10, 8)
+        parent, text="Range Export", padding=(10, 6, 10, 8)
     )
     range_tools.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 8))
     ttk.Label(range_tools, text="Start seconds").grid(row=0, column=0, sticky="w")
@@ -82,10 +83,58 @@ def build_studio_panel(app, parent):
 
     build_midi_editor_panel(app, parent, row=4)
 
+    timeline = ttk.LabelFrame(parent, text="Timeline", padding=(10, 6, 10, 8))
+    timeline.grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 8))
+    timeline.columnconfigure(0, weight=1)
+    view_controls = ttk.Frame(timeline)
+    view_controls.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+    ttk.Label(view_controls, text="View Mode").grid(row=0, column=0, sticky="w")
+    view_combo = ttk.Combobox(
+        view_controls,
+        textvariable=app.studio_view_mode_var,
+        values=("Piano Roll", "Staff View"),
+        state="readonly",
+        width=12,
+    )
+    view_combo.grid(row=0, column=1, sticky="w", padx=(8, 16))
+    view_combo.bind("<<ComboboxSelected>>", app.on_studio_view_mode_changed)
+    ttk.Button(view_controls, text="Zoom -", command=lambda: app.zoom_staff_view(0.8)).grid(
+        row=0, column=2, sticky="w"
+    )
+    ttk.Button(view_controls, text="Zoom +", command=lambda: app.zoom_staff_view(1.25)).grid(
+        row=0, column=3, sticky="w", padx=(6, 0)
+    )
+
+    app.piano_roll_frame = ttk.Frame(timeline)
+    app.piano_roll_frame.grid(row=1, column=0, sticky="ew")
+    app.piano_roll_frame.columnconfigure(0, weight=1)
     app.studio_canvas = tk.Canvas(
-        parent,
+        app.piano_roll_frame,
         background="#202225",
         highlightthickness=0,
         height=80,
     )
-    app.studio_canvas.grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 12))
+    app.studio_canvas.grid(row=0, column=0, sticky="ew")
+
+    app.staff_view_frame = ttk.Frame(timeline)
+    app.staff_view_frame.columnconfigure(0, weight=1)
+    app.staff_view = StaffViewCanvas(
+        app.staff_view_frame, selection_callback=app.on_staff_note_selected
+    )
+    app.staff_view.grid(row=0, column=0, sticky="ew")
+    staff_scroll = ttk.Scrollbar(
+        app.staff_view_frame, orient="horizontal", command=app.staff_view.xview
+    )
+    staff_scroll.grid(row=1, column=0, sticky="ew")
+    app.staff_view.configure(xscrollcommand=staff_scroll.set)
+    ttk.Label(
+        app.staff_view_frame, textvariable=app.staff_selected_note_var
+    ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+
+    future = ttk.LabelFrame(parent, text="Future AI Repair", padding=10)
+    future.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 12))
+    ttk.Label(
+        future,
+        text="Reserved for assisted note repair and recovery tools.",
+        foreground="#666",
+    ).grid(row=0, column=0, sticky="w")

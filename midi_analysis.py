@@ -4,6 +4,14 @@ from pathlib import Path
 import mido
 
 from midi_rule_engine import read_midi_notes
+from midi_to_keyboard import DEFAULT_NOTE_MAP
+
+
+PITCH_CLASS_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+KEY_SCALES = {
+    "major": (0, 2, 4, 5, 7, 9, 11),
+    "minor": (0, 2, 3, 5, 7, 8, 10),
+}
 
 
 MIDI_ANALYSIS_REPORT_NAME = "report.json"
@@ -44,6 +52,76 @@ def midi_duration_and_tempo(midi_path):
             tempo = tempo_message.tempo
             break
     return float(midi.length), float(mido.tempo2bpm(tempo))
+
+
+def inspect_midi_file(midi_path):
+    """Return source-file metadata without creating or changing any files."""
+    midi_path = Path(midi_path)
+    midi = mido.MidiFile(midi_path)
+    tempo_message = next(
+        (
+            message
+            for track in midi.tracks
+            for message in track
+            if message.type == "set_tempo"
+        ),
+        None,
+    )
+    note_numbers = [
+        message.note
+        for track in midi.tracks
+        for message in track
+        if message.type == "note_on" and message.velocity > 0
+    ]
+
+    detected_key = None
+    if note_numbers:
+        # Do not use the 37-key optimizer's detector here: source metadata must
+        # also work when the imported performance contains out-of-range notes.
+        root, mode = max(
+            (
+                (root, mode)
+                for root in range(12)
+                for mode in KEY_SCALES
+            ),
+            key=lambda candidate: sum(
+                (note - candidate[0]) % 12 in KEY_SCALES[candidate[1]]
+                for note in note_numbers
+            ),
+        )
+        detected_key = f"{PITCH_CLASS_NAMES[root]} {mode}"
+
+    try:
+        duration = float(midi.length)
+    except ValueError:
+        # SMF type 2 stores independent sequences, so there is no merged mido
+        # length. Present the longest sequence as the file duration.
+        track_durations = []
+        for track in midi.tracks:
+            seconds = 0.0
+            tempo = 500000
+            for message in track:
+                seconds += mido.tick2second(message.time, midi.ticks_per_beat, tempo)
+                if message.type == "set_tempo":
+                    tempo = message.tempo
+            track_durations.append(seconds)
+        duration = max(track_durations, default=0.0)
+
+    return {
+        "file_name": midi_path.name,
+        "duration": duration,
+        "bpm": (
+            float(mido.tempo2bpm(tempo_message.tempo))
+            if tempo_message is not None
+            else None
+        ),
+        "key": detected_key,
+        "ppq": int(midi.ticks_per_beat),
+        "tracks": len(midi.tracks),
+        "total_notes": len(note_numbers),
+        "notes_inside_map": sum(note in DEFAULT_NOTE_MAP for note in note_numbers),
+        "notes_outside_map": sum(note not in DEFAULT_NOTE_MAP for note in note_numbers),
+    }
 
 
 def build_midi_analysis_report(

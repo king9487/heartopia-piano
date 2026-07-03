@@ -7,6 +7,7 @@ from tkinter import messagebox
 import mido
 
 from midi_range import CHORUS_MIDI_NAME, export_midi_range
+from midi_to_keyboard import midi_note_name
 
 
 class UiStudioActionsMixin:
@@ -63,6 +64,8 @@ class UiStudioActionsMixin:
             self.format_studio_time(self.studio_total_duration)
         )
         self.studio_status_var.set("Ready")
+        if self.staff_view is not None:
+            self.staff_view.load_midi(midi_path)
         return True
 
     def update_studio_position(self, position):
@@ -75,6 +78,39 @@ class UiStudioActionsMixin:
         self.studio_current_time_var.set(
             self.format_studio_time(self.studio_position)
         )
+        if self.staff_view is not None:
+            self.staff_view.set_playhead(self.studio_position)
+
+    def on_studio_view_mode_changed(self, event=None):
+        if self.piano_roll_frame is None or self.staff_view_frame is None:
+            return
+        if self.studio_view_mode_var.get() == "Staff View":
+            self.piano_roll_frame.grid_remove()
+            self.staff_view_frame.grid(row=1, column=0, sticky="ew")
+            if self.studio_loaded_path is not None and self.staff_view is not None:
+                self.staff_view.load_midi(self.studio_loaded_path)
+                self.staff_view.set_playhead(self.studio_position)
+        else:
+            self.staff_view_frame.grid_remove()
+            self.piano_roll_frame.grid()
+
+    def zoom_staff_view(self, factor):
+        if self.staff_view is not None:
+            self.staff_view.zoom_by(factor)
+            self.staff_view.set_playhead(self.studio_position)
+
+    def on_staff_note_selected(self, index, note):
+        self.staff_selected_note_var.set(
+            f"{midi_note_name(note.note)}  |  start {int(round(note.start * 1000))} ms"
+            f"  |  duration {int(round(note.duration_ms))} ms"
+            f"  |  velocity {note.velocity}"
+        )
+        if self.editor_source_path != self.studio_loaded_path:
+            self.open_selected_midi_in_editor()
+        if self.editor_tree is not None and self.editor_tree.exists(str(index)):
+            self.editor_tree.selection_set(str(index))
+            self.editor_tree.focus(str(index))
+            self.editor_tree.see(str(index))
 
     def on_studio_seek(self, value):
         if self.studio_updating_slider or self.studio_loaded_path is None:

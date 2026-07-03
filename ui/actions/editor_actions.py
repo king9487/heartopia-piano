@@ -49,6 +49,13 @@ class UiEditorActionsMixin:
                 ),
                 tags=tags,
             )
+        if (
+            self.staff_view is not None
+            and self.studio_view_mode_var.get() == "Staff View"
+            and self.editor_source_path == self.studio_loaded_path
+        ):
+            self.staff_view.render_notes(self.editor_notes)
+            self.staff_view.set_playhead(self.studio_position)
 
     def selected_editor_indices(self):
         if self.editor_tree is None:
@@ -65,6 +72,7 @@ class UiEditorActionsMixin:
             for index, note in enumerate(self.editor_notes)
             if index not in selected
         ]
+        self.clear_staff_note_selection()
         self.refresh_editor_tree()
 
     def delete_same_pitch_editor_notes(self):
@@ -74,6 +82,7 @@ class UiEditorActionsMixin:
             return
         pitches = {self.editor_notes[index].note for index in selected}
         self.editor_notes = [note for note in self.editor_notes if note.note not in pitches]
+        self.clear_staff_note_selection()
         self.refresh_editor_tree()
 
     def delete_suspicious_editor_notes(self):
@@ -86,7 +95,13 @@ class UiEditorActionsMixin:
             for index, note in enumerate(self.editor_notes)
             if index not in suspicious
         ]
+        self.clear_staff_note_selection()
         self.refresh_editor_tree()
+
+    def clear_staff_note_selection(self):
+        if self.staff_view is not None:
+            self.staff_view.selected_index = None
+        self.staff_selected_note_var.set("No staff note selected")
 
     def save_editor_midi(self):
         if self.editor_source_path is None:

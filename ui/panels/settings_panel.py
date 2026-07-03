@@ -1,9 +1,9 @@
 from tkinter import ttk
 
 
-def build_settings_panel(app, parent):
-    panel = ttk.LabelFrame(parent, text="Playback and conversion", padding=12)
-    panel.grid(row=0, column=0, sticky="new", padx=12, pady=12)
+def build_settings_panel(app, parent, start_row=0):
+    panel = ttk.LabelFrame(parent, text="Playback Settings", padding=12)
+    panel.grid(row=start_row, column=0, sticky="new", padx=12, pady=(0, 12))
     panel.columnconfigure(1, weight=1)
 
     ttk.Checkbutton(
@@ -57,19 +57,7 @@ def build_settings_panel(app, parent):
         textvariable=app.min_hold_var,
         width=8,
     ).grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-    ttk.Label(panel, text="Demucs device").grid(row=6, column=0, sticky="w", pady=(8, 0))
-    ttk.Combobox(
-        panel,
-        textvariable=app.demucs_device_var,
-        values=("cuda:0", "auto", "cpu"),
-        state="readonly",
-        width=10,
-    ).grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-    ttk.Checkbutton(
-        panel,
-        text="Convert vocals MIDI",
-        variable=app.convert_vocals_midi_var,
-    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    return start_row + 1
 
 
 # Backward-compatible name used by older panel composition code.

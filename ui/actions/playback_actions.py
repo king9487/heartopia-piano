@@ -44,8 +44,8 @@ class UiPlaybackActionsMixin:
 
         return settings
 
-    def preview_selected_midi(self):
-        midi_path = self.get_selected_midi()
+    def preview_selected_midi(self, midi_path=None):
+        midi_path = midi_path or self.get_selected_midi()
         if not midi_path:
             return
 
