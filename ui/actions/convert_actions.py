@@ -86,6 +86,7 @@ class UiConvertActionsMixin:
             return
         for variable in self.external_midi_info_vars.values():
             variable.set("--")
+        self.clear_external_midi_analysis()
         try:
             metadata = inspect_midi_file(filename)
         except Exception as exc:
@@ -156,6 +157,41 @@ class UiConvertActionsMixin:
         }
         for key, value in display.items():
             self.external_midi_info_vars[key].set(str(value))
+        track_tree = getattr(self, "external_midi_track_tree", None)
+        if track_tree is not None:
+            for item in track_tree.get_children():
+                track_tree.delete(item)
+            for track in metadata.get("notes_per_track", ()):
+                label = f"Track {track['track_number']}"
+                if track.get("name"):
+                    label += f" — {track['name']}"
+                track_tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        label,
+                        track["notes"],
+                        track["playable_notes"],
+                        track["out_of_range_notes"],
+                    ),
+                )
+        channel_tree = getattr(self, "external_midi_channel_tree", None)
+        if channel_tree is not None:
+            for item in channel_tree.get_children():
+                channel_tree.delete(item)
+            for channel in metadata.get("notes_per_channel", ()):
+                channel_tree.insert(
+                    "",
+                    "end",
+                    values=(f"Channel {channel['channel']}", channel["notes"]),
+                )
+
+    def clear_external_midi_analysis(self):
+        for attribute in ("external_midi_track_tree", "external_midi_channel_tree"):
+            tree = getattr(self, attribute, None)
+            if tree is not None:
+                for item in tree.get_children():
+                    tree.delete(item)
 
     def get_imported_original_midi(self):
         filename = self.external_midi_path_var.get().strip()

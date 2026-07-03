@@ -97,6 +97,55 @@ class ExternalMidiImportTests(unittest.TestCase):
             self.assertEqual(metadata["notes_inside_map"], 2)
             self.assertEqual(metadata["notes_outside_map"], 2)
 
+    def test_metadata_reports_note_counts_by_track_and_channel(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "tracks-and-channels.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            meta_track = mido.MidiTrack()
+            meta_track.name = "Conductor"
+            midi.tracks.append(meta_track)
+            piano_track = mido.MidiTrack()
+            piano_track.name = "Piano"
+            piano_track.extend(
+                (
+                    mido.Message("note_on", channel=0, note=60, velocity=80, time=0),
+                    mido.Message("note_on", channel=0, note=73, velocity=80, time=0),
+                )
+            )
+            midi.tracks.append(piano_track)
+            bass_track = mido.MidiTrack()
+            bass_track.name = "Bass"
+            bass_track.append(
+                mido.Message("note_on", channel=2, note=48, velocity=80, time=0)
+            )
+            midi.tracks.append(bass_track)
+            midi.save(source)
+
+            metadata = inspect_midi_file(source)
+
+            self.assertEqual(
+                metadata["notes_per_track"],
+                [
+                    {
+                        "track_number": 1, "name": "Conductor", "notes": 0,
+                        "playable_notes": 0, "out_of_range_notes": 0,
+                    },
+                    {
+                        "track_number": 2, "name": "Piano", "notes": 2,
+                        "playable_notes": 1, "out_of_range_notes": 1,
+                    },
+                    {
+                        "track_number": 3, "name": "Bass", "notes": 1,
+                        "playable_notes": 1, "out_of_range_notes": 0,
+                    },
+                ],
+            )
+            self.assertEqual(metadata["notes_per_channel"][0]["notes"], 2)
+            self.assertEqual(metadata["notes_per_channel"][2]["notes"], 1)
+            self.assertEqual(
+                sum(item["notes"] for item in metadata["notes_per_channel"]), 3
+            )
+
     def test_skipped_stages_create_named_pass_through_working_files(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

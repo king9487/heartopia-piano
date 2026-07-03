@@ -67,12 +67,32 @@ def inspect_midi_file(midi_path):
         ),
         None,
     )
-    note_numbers = [
-        message.note
-        for track in midi.tracks
-        for message in track
-        if message.type == "note_on" and message.velocity > 0
-    ]
+    track_analysis = []
+    channel_counts = {channel: 0 for channel in range(16)}
+    note_numbers = []
+    for track_index, track in enumerate(midi.tracks):
+        track_notes = [
+            message.note
+            for message in track
+            if message.type == "note_on" and message.velocity > 0
+        ]
+        note_numbers.extend(track_notes)
+        for message in track:
+            if message.type == "note_on" and message.velocity > 0:
+                channel_counts[message.channel] += 1
+        track_analysis.append(
+            {
+                "track_number": track_index + 1,
+                "name": track.name or "",
+                "notes": len(track_notes),
+                "playable_notes": sum(
+                    note in DEFAULT_NOTE_MAP for note in track_notes
+                ),
+                "out_of_range_notes": sum(
+                    note not in DEFAULT_NOTE_MAP for note in track_notes
+                ),
+            }
+        )
 
     detected_key = None
     if note_numbers:
@@ -121,6 +141,11 @@ def inspect_midi_file(midi_path):
         "total_notes": len(note_numbers),
         "notes_inside_map": sum(note in DEFAULT_NOTE_MAP for note in note_numbers),
         "notes_outside_map": sum(note not in DEFAULT_NOTE_MAP for note in note_numbers),
+        "notes_per_track": track_analysis,
+        "notes_per_channel": [
+            {"channel": channel + 1, "notes": channel_counts[channel]}
+            for channel in range(16)
+        ],
     }
 
 

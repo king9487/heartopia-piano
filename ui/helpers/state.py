@@ -108,6 +108,8 @@ def initialize_app_state(app):
     app.preview_original_midi_button = None
     app.play_original_midi_button = None
     app.open_original_midi_button = None
+    app.external_midi_track_tree = None
+    app.external_midi_channel_tree = None
     app.youtube_input_frame = None
     app.local_audio_input_frame = None
     app.external_midi_input_frame = None

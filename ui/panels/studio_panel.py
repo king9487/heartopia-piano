@@ -98,10 +98,10 @@ def build_studio_panel(app, parent):
     )
     view_combo.grid(row=0, column=1, sticky="w", padx=(8, 16))
     view_combo.bind("<<ComboboxSelected>>", app.on_studio_view_mode_changed)
-    ttk.Button(view_controls, text="Zoom -", command=lambda: app.zoom_staff_view(0.8)).grid(
+    ttk.Button(view_controls, text="Zoom -", command=lambda: app.zoom_timeline_view(0.8)).grid(
         row=0, column=2, sticky="w"
     )
-    ttk.Button(view_controls, text="Zoom +", command=lambda: app.zoom_staff_view(1.25)).grid(
+    ttk.Button(view_controls, text="Zoom +", command=lambda: app.zoom_timeline_view(1.25)).grid(
         row=0, column=3, sticky="w", padx=(6, 0)
     )
 
@@ -113,6 +113,11 @@ def build_studio_panel(app, parent):
         log_callback=app.log_message,
     )
     app.studio_canvas.grid(row=0, column=0, sticky="ew")
+    piano_roll_scroll = ttk.Scrollbar(
+        app.piano_roll_frame, orient="horizontal", command=app.studio_canvas.xview
+    )
+    piano_roll_scroll.grid(row=1, column=0, sticky="ew")
+    app.studio_canvas.configure(xscrollcommand=piano_roll_scroll.set)
 
     app.staff_view_frame = ttk.Frame(timeline)
     app.staff_view_frame.columnconfigure(0, weight=1)

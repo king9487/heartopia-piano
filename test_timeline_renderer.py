@@ -1,6 +1,6 @@
 import unittest
 
-from ui.panels.timeline_renderer import TimelineRenderer
+from ui.panels.timeline_renderer import PianoRollRenderer, TimelineRenderer
 
 
 class RendererSpy:
@@ -37,6 +37,34 @@ class TimelineRendererTests(unittest.TestCase):
 
         self.assertEqual(piano_roll.playhead, 1.25)
         self.assertEqual(staff.playhead, 1.25)
+
+
+class PianoRollScaleTests(unittest.TestCase):
+    def make_renderer(self):
+        renderer = PianoRollRenderer.__new__(PianoRollRenderer)
+        renderer.pixels_per_second = PianoRollRenderer.DEFAULT_PIXELS_PER_SECOND
+        return renderer
+
+    def test_default_scale_uses_80_pixels_per_second(self):
+        renderer = self.make_renderer()
+
+        self.assertEqual(renderer.time_to_x(1.0), 80.0)
+        self.assertEqual(renderer.time_to_x(180.0), 14400.0)
+
+    def test_note_width_uses_duration_and_has_two_pixel_minimum(self):
+        renderer = self.make_renderer()
+
+        self.assertEqual(renderer.duration_to_width(0.5), 40.0)
+        self.assertEqual(renderer.duration_to_width(0.001), 2.0)
+
+    def test_zoom_changes_time_spacing(self):
+        renderer = self.make_renderer()
+        renderer.render_notes = lambda: None
+
+        renderer.zoom_by(1.25)
+        self.assertEqual(renderer.time_to_x(1.0), 100.0)
+        renderer.zoom_by(0.8)
+        self.assertEqual(renderer.time_to_x(1.0), 80.0)
 
 
 if __name__ == "__main__":

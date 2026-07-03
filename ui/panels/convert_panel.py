@@ -123,6 +123,57 @@ def build_import_panel(app, parent, start_row=0):
             row=row, column=label_column + 1, sticky="w", padx=(8, 24), pady=1
         )
 
+    analysis = ttk.Frame(original)
+    analysis.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+    analysis.columnconfigure(0, weight=3)
+    analysis.columnconfigure(1, weight=2)
+
+    tracks = ttk.LabelFrame(analysis, text="Notes by Track", padding=6)
+    tracks.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+    tracks.columnconfigure(0, weight=1)
+    app.external_midi_track_tree = ttk.Treeview(
+        tracks,
+        columns=("track", "notes", "playable", "outside"),
+        show="headings",
+        height=5,
+    )
+    for column, heading, width, anchor in (
+        ("track", "Track", 190, "w"),
+        ("notes", "Notes", 60, "e"),
+        ("playable", "Playable", 70, "e"),
+        ("outside", "Out of range", 90, "e"),
+    ):
+        app.external_midi_track_tree.heading(column, text=heading)
+        app.external_midi_track_tree.column(
+            column, width=width, minwidth=50, anchor=anchor
+        )
+    app.external_midi_track_tree.grid(row=0, column=0, sticky="nsew")
+    track_scroll = ttk.Scrollbar(
+        tracks, orient="vertical", command=app.external_midi_track_tree.yview
+    )
+    track_scroll.grid(row=0, column=1, sticky="ns")
+    app.external_midi_track_tree.configure(yscrollcommand=track_scroll.set)
+
+    channels = ttk.LabelFrame(analysis, text="Notes by Channel", padding=6)
+    channels.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+    channels.columnconfigure(0, weight=1)
+    app.external_midi_channel_tree = ttk.Treeview(
+        channels,
+        columns=("channel", "notes"),
+        show="headings",
+        height=5,
+    )
+    app.external_midi_channel_tree.heading("channel", text="Channel")
+    app.external_midi_channel_tree.heading("notes", text="Notes")
+    app.external_midi_channel_tree.column("channel", width=100, anchor="w")
+    app.external_midi_channel_tree.column("notes", width=70, anchor="e")
+    app.external_midi_channel_tree.grid(row=0, column=0, sticky="nsew")
+    channel_scroll = ttk.Scrollbar(
+        channels, orient="vertical", command=app.external_midi_channel_tree.yview
+    )
+    channel_scroll.grid(row=0, column=1, sticky="ns")
+    app.external_midi_channel_tree.configure(yscrollcommand=channel_scroll.set)
+
     optimize = ttk.LabelFrame(
         parent, text="Optimize for Heartopia", padding=12
     )

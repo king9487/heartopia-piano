@@ -126,6 +126,8 @@ class YoutubeMidiApp(
     preview_original_midi_button: ttk.Button | None
     play_original_midi_button: ttk.Button | None
     open_original_midi_button: ttk.Button | None
+    external_midi_track_tree: ttk.Treeview | None
+    external_midi_channel_tree: ttk.Treeview | None
     stop_button: ttk.Button | None
     play_button: ttk.Button | None
     midi_source_combo: ttk.Combobox | None

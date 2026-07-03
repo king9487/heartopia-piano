@@ -27,6 +27,20 @@ class Button:
         self.state = kwargs.get("state", self.state)
 
 
+class Tree:
+    def __init__(self):
+        self.rows = []
+
+    def get_children(self):
+        return tuple(range(len(self.rows)))
+
+    def delete(self, item):
+        self.rows[item] = None
+
+    def insert(self, _parent, _position, values):
+        self.rows.append(values)
+
+
 class ExternalMidiUiHarness(UiConvertActionsMixin):
     def __init__(self):
         self.external_midi_path_var = Variable()
@@ -43,6 +57,8 @@ class ExternalMidiUiHarness(UiConvertActionsMixin):
         self.preview_original_midi_button = Button()
         self.play_original_midi_button = Button()
         self.open_original_midi_button = Button()
+        self.external_midi_track_tree = Tree()
+        self.external_midi_channel_tree = Tree()
         self.results = None
         self.logs = []
         self.previewed = []
@@ -84,6 +100,14 @@ class ExternalMidiUiTests(unittest.TestCase):
             self.assertEqual(app.process_external_midi_button.state, "normal")
             self.assertEqual(app.preview_original_midi_button.state, "normal")
             self.assertEqual(app.play_original_midi_button.state, "normal")
+            self.assertEqual(
+                app.external_midi_track_tree.rows,
+                [("Track 1", 3, 3, 0)],
+            )
+            self.assertEqual(len(app.external_midi_channel_tree.rows), 16)
+            self.assertEqual(
+                app.external_midi_channel_tree.rows[0], ("Channel 1", 3)
+            )
             self.assertFalse((root / "output").exists())
 
     def test_original_actions_reuse_preview_and_playback_with_source_path(self):

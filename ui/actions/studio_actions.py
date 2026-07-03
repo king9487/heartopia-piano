@@ -97,10 +97,20 @@ class UiStudioActionsMixin:
                 self.studio_canvas.render_notes(self.timeline_renderer.notes)
                 self.studio_canvas.set_playhead(self.studio_position)
 
-    def zoom_staff_view(self, factor):
-        if self.staff_view is not None:
+    def zoom_timeline_view(self, factor):
+        if (
+            self.studio_view_mode_var.get() == "Piano Roll"
+            and self.studio_canvas is not None
+        ):
+            self.studio_canvas.zoom_by(factor)
+            self.studio_canvas.set_playhead(self.studio_position)
+        elif self.staff_view is not None:
             self.staff_view.zoom_by(factor)
             self.staff_view.set_playhead(self.studio_position)
+
+    def zoom_staff_view(self, factor):
+        """Keep the previous callback available for external callers."""
+        self.zoom_timeline_view(factor)
 
     def on_staff_note_selected(self, index, note):
         self.staff_selected_note_var.set(

@@ -43,13 +43,29 @@ class PianoRollRenderer(_NoteCanvas):
     """Compact piano-roll renderer using the shared timeline note objects."""
 
     renderer_name = "Piano Roll"
-    X_PADDING = 8
+    DEFAULT_PIXELS_PER_SECOND = 80.0
+    MIN_PIXELS_PER_SECOND = 10.0
+    MAX_PIXELS_PER_SECOND = 640.0
     Y_PADDING = 6
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, pixels_per_second=DEFAULT_PIXELS_PER_SECOND, **kwargs):
         super().__init__(parent, background="#202225", height=80, **kwargs)
         self.total_duration = 0.0
         self.playhead_seconds = 0.0
+        self.pixels_per_second = float(pixels_per_second)
+
+    def time_to_x(self, seconds):
+        return max(0.0, float(seconds)) * self.pixels_per_second
+
+    def duration_to_width(self, seconds):
+        return max(2.0, max(0.0, float(seconds)) * self.pixels_per_second)
+
+    def zoom_by(self, factor):
+        self.pixels_per_second = min(
+            self.MAX_PIXELS_PER_SECOND,
+            max(self.MIN_PIXELS_PER_SECOND, self.pixels_per_second * float(factor)),
+        )
+        self.render_notes()
 
     def render_notes(self, notes=None):
         if notes is not None:
@@ -85,24 +101,26 @@ class PianoRollRenderer(_NoteCanvas):
             )
             return
 
+        timeline_width = self.total_duration * self.pixels_per_second
+        self.configure(scrollregion=(0, 0, timeline_width, height))
+
         low_pitch = min(int(note.note) for note in valid_notes)
         high_pitch = max(int(note.note) for note in valid_notes)
         pitch_span = max(1, high_pitch - low_pitch + 1)
-        drawable_width = max(1, width - (2 * self.X_PADDING))
         drawable_height = max(1, height - (2 * self.Y_PADDING))
 
         for note in valid_notes:
             start = max(0.0, float(note.start))
             end = max(start, float(note.end))
-            x1 = self.X_PADDING + (start / self.total_duration) * drawable_width
-            x2 = self.X_PADDING + (end / self.total_duration) * drawable_width
+            x1 = self.time_to_x(start)
+            note_width = self.duration_to_width(end - start)
             row = high_pitch - int(note.note)
             y1 = self.Y_PADDING + (row / pitch_span) * drawable_height
             y2 = self.Y_PADDING + ((row + 0.8) / pitch_span) * drawable_height
             velocity = max(0, min(127, int(note.velocity)))
             blue = 120 + int((velocity / 127) * 115)
             self.create_rectangle(
-                x1, y1, max(x1 + 2, x2), max(y1 + 2, y2),
+                x1, y1, x1 + note_width, max(y1 + 2, y2),
                 fill=f"#3b82{blue:02x}", outline="",
             )
             self.rendered_notes += 1
@@ -115,10 +133,9 @@ class PianoRollRenderer(_NoteCanvas):
     def _draw_playhead(self):
         if self.total_duration <= 0:
             return
-        width, height = self._canvas_size()
-        drawable_width = max(1, width - (2 * self.X_PADDING))
+        _, height = self._canvas_size()
         position = min(max(self.playhead_seconds, 0.0), self.total_duration)
-        x = self.X_PADDING + (position / self.total_duration) * drawable_width
+        x = self.time_to_x(position)
         self.create_line(x, 0, x, height, fill="#ef4444", width=2, tags=("playhead",))
 
     def set_playhead(self, seconds):
