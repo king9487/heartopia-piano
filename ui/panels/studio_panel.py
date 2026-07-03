@@ -1,8 +1,8 @@
-import tkinter as tk
 from tkinter import ttk
 
 from ui.panels.midi_editor_panel import build_midi_editor_panel
-from ui.panels.staff_view import StaffViewCanvas
+from ui.panels.staff_view import StaffRenderer
+from ui.panels.timeline_renderer import PianoRollRenderer, TimelineRenderer
 
 
 def build_studio_panel(app, parent):
@@ -108,18 +108,18 @@ def build_studio_panel(app, parent):
     app.piano_roll_frame = ttk.Frame(timeline)
     app.piano_roll_frame.grid(row=1, column=0, sticky="ew")
     app.piano_roll_frame.columnconfigure(0, weight=1)
-    app.studio_canvas = tk.Canvas(
+    app.studio_canvas = PianoRollRenderer(
         app.piano_roll_frame,
-        background="#202225",
-        highlightthickness=0,
-        height=80,
+        log_callback=app.log_message,
     )
     app.studio_canvas.grid(row=0, column=0, sticky="ew")
 
     app.staff_view_frame = ttk.Frame(timeline)
     app.staff_view_frame.columnconfigure(0, weight=1)
-    app.staff_view = StaffViewCanvas(
-        app.staff_view_frame, selection_callback=app.on_staff_note_selected
+    app.staff_view = StaffRenderer(
+        app.staff_view_frame,
+        selection_callback=app.on_staff_note_selected,
+        log_callback=app.log_message,
     )
     app.staff_view.grid(row=0, column=0, sticky="ew")
     staff_scroll = ttk.Scrollbar(
@@ -130,6 +130,7 @@ def build_studio_panel(app, parent):
     ttk.Label(
         app.staff_view_frame, textvariable=app.staff_selected_note_var
     ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+    app.timeline_renderer = TimelineRenderer(app.studio_canvas, app.staff_view)
 
     future = ttk.LabelFrame(parent, text="Future AI Repair", padding=10)
     future.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 12))

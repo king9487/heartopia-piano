@@ -123,6 +123,7 @@ def initialize_app_state(app):
     app.studio_stop_button = None
     app.editor_tree = None
     app.studio_canvas = None
+    app.timeline_renderer = None
     app.piano_roll_frame = None
     app.staff_view_frame = None
     app.staff_view = None

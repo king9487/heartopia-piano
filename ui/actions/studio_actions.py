@@ -64,8 +64,8 @@ class UiStudioActionsMixin:
             self.format_studio_time(self.studio_total_duration)
         )
         self.studio_status_var.set("Ready")
-        if self.staff_view is not None:
-            self.staff_view.load_midi(midi_path)
+        if self.timeline_renderer is not None:
+            self.timeline_renderer.load_midi(midi_path)
         return True
 
     def update_studio_position(self, position):
@@ -78,8 +78,8 @@ class UiStudioActionsMixin:
         self.studio_current_time_var.set(
             self.format_studio_time(self.studio_position)
         )
-        if self.staff_view is not None:
-            self.staff_view.set_playhead(self.studio_position)
+        if self.timeline_renderer is not None:
+            self.timeline_renderer.set_playhead(self.studio_position)
 
     def on_studio_view_mode_changed(self, event=None):
         if self.piano_roll_frame is None or self.staff_view_frame is None:
@@ -87,12 +87,15 @@ class UiStudioActionsMixin:
         if self.studio_view_mode_var.get() == "Staff View":
             self.piano_roll_frame.grid_remove()
             self.staff_view_frame.grid(row=1, column=0, sticky="ew")
-            if self.studio_loaded_path is not None and self.staff_view is not None:
-                self.staff_view.load_midi(self.studio_loaded_path)
+            if self.timeline_renderer is not None:
+                self.staff_view.render_notes(self.timeline_renderer.notes)
                 self.staff_view.set_playhead(self.studio_position)
         else:
             self.staff_view_frame.grid_remove()
             self.piano_roll_frame.grid()
+            if self.timeline_renderer is not None:
+                self.studio_canvas.render_notes(self.timeline_renderer.notes)
+                self.studio_canvas.set_playhead(self.studio_position)
 
     def zoom_staff_view(self, factor):
         if self.staff_view is not None:

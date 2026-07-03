@@ -50,12 +50,11 @@ class UiEditorActionsMixin:
                 tags=tags,
             )
         if (
-            self.staff_view is not None
-            and self.studio_view_mode_var.get() == "Staff View"
+            self.timeline_renderer is not None
             and self.editor_source_path == self.studio_loaded_path
         ):
-            self.staff_view.render_notes(self.editor_notes)
-            self.staff_view.set_playhead(self.studio_position)
+            self.timeline_renderer.set_notes(self.editor_notes)
+            self.timeline_renderer.set_playhead(self.studio_position)
 
     def selected_editor_indices(self):
         if self.editor_tree is None:

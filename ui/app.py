@@ -138,6 +138,7 @@ class YoutubeMidiApp(
     studio_stop_button: ttk.Button | None
     editor_tree: ttk.Treeview | None
     studio_canvas: tk.Canvas | None
+    timeline_renderer: Any
     piano_roll_frame: ttk.Frame | None
     staff_view_frame: ttk.Frame | None
     staff_view: Any
