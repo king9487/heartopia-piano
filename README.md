@@ -4,34 +4,51 @@ Heartopia Piano Studio 是一套為《心動小鎮》（Heartopia）37 鍵鋼琴
 
 > English summary: A Windows tool for converting, analyzing, optimizing, editing, previewing, and playing MIDI on Heartopia's 37-key piano (`C2`–`C5`).
 
-## 專案用途
+## 專案概覽
 
 本專案的核心目標，是把不同來源的音樂整理成適合 Heartopia 37 鍵鋼琴的版本，並協助使用者理解每個處理階段造成的變化。
 
-主要用途包括：
+Heartopia Piano Studio **不只是一個 YouTube-to-MIDI converter**。它同時支援 YouTube、本機音訊（local audio）與外部 MIDI（external MIDI），可以將音訊轉錄成 MIDI，也可以直接播放或進一步整理既有 MIDI。最終目標是產生適合 Heartopia 37 鍵鋼琴播放的版本。
+
+## 功能總覽
+
+- YouTube 音訊下載（YouTube audio download）
+- 本機音訊匯入（local audio import）
+- 外部 MIDI 匯入（external MIDI import）
+- 匯入 MIDI 直接播放（Direct Play）
+- Demucs 音軌分離（source separation）
+- Basic Pitch 音訊轉錄（transcription）
+- 37 鍵清理（37-key cleanup）
+- 鋼琴編曲（Piano Arranger）
+- AI 最佳化（AI Optimizer，支援 Rule／OpenAI 模式）
+- 音高修正（Pitch Correction）
+- MIDI 工作室（MIDI Studio）
+- MIDI 編輯器（MIDI Editor）
+- 版本比較（A/B Compare）
+- 以電腦鍵盤播放到遊戲（keyboard playback／Play to Game）
+
+## 輸入工作流程
+
+### YouTube／Audio workflow
 
 - 將 YouTube 或本機音訊分離音軌（Demucs），再轉錄為 MIDI（Basic Pitch）。
-- 匯入現有 MIDI，分析 Track、Channel、音域與可播放比例。
-- 將音符限制或調整至 `C2`–`C5`，清除過短、過弱或過密的音符。
-- 製作偏向鋼琴演奏的編曲（Piano Arranger），並執行規則或 OpenAI 最佳化。
-- 比較、預覽、編輯各階段 MIDI，最後以鍵盤事件播放到遊戲（Play to Game）。
+- YouTube 來源會先由 `yt-dlp` 下載音訊；本機 Audio File 則直接使用所選檔案。
+- 兩者之後都會經過 `Demucs → Basic Pitch → 37-key pipeline`。
+- 此流程需要 FFmpeg 與相關模型；YouTube 下載另需要網路。
 
-## 支援的輸入來源
+### External MIDI direct play workflow
 
-### 1. YouTube Video
+1. 匯入 `.mid` 或 `.midi`。
+2. 在 Import 分頁檢查 Track、Channel、音域與可播放比例。
+3. 勾選 Direct Play 要使用的 `Track + Channel` 聲部，並選擇如何處理超出 37 鍵的音。
+4. 使用 Preview Original 或 Play Original，不必先執行完整最佳化。
 
-輸入 YouTube 網址後，程式會使用 `yt-dlp` 取得音訊，經 Demucs 分離，再由 Basic Pitch 轉成 MIDI。此流程需要網路、FFmpeg 與相關模型。
+### External MIDI optimize workflow
 
-### 2. Audio File
-
-選擇本機音訊檔後，會直接進入與 YouTube 相同的 Demucs 與 Basic Pitch 流程，不執行下載。
-
-### 3. MIDI File
-
-可匯入 `.mid` 或 `.midi` 檔案。匯入後有兩種用法：
-
-- 直接播放（Direct Play）：使用匯入的 MIDI，不必先跑完整最佳化流程。
-- 為 Heartopia 處理（Optimize for Heartopia）：選取需要的音樂聲部，再產生 37 鍵版本。
+1. 匯入 `.mid` 或 `.midi`，勾選 Optimization 要使用的 `Track + Channel` 聲部。
+2. 選擇 Preset、Cleanup、Piano Arranger、AI Optimizer 與 Pitch Correction 設定。
+3. 執行 Process Imported MIDI，建立適合 Heartopia 的 37 鍵版本。
+4. 使用 A/B Compare、Studio 或 MIDI Editor 檢查結果，再 Play to Game。
 
 MIDI Track 不一定等於人耳理解的「一個樂器」或「一個聲部」。同一個 Track 內可能包含多個 Channel，因此實際聲部可能是 `Track + Channel` 的組合。Import 分頁會同時分析兩者，並讓 Direct Play 與 Optimization 各自選取要使用的 Track/Channel 聲部。
 
@@ -40,9 +57,9 @@ MIDI Track 不一定等於人耳理解的「一個樂器」或「一個聲部」
 假設匯入檔案的分析結果如下：
 
 ```text
-Track 0 Channel 0: 618 notes, many out of range
-Track 0 Channel 1: 517 notes, playable
-Track 1 Channel 0: 312 notes, playable
+Track 0 Channel 0 = 618 notes
+Track 0 Channel 1 = 517 notes
+Track 1 Channel 0 = 312 notes
 ```
 
 - Track 是 MIDI 檔案中的容器或層（container/layer），用來收納事件。
@@ -85,6 +102,12 @@ YouTube 與 Audio 在進入上圖前，會先經過 `Demucs → Basic Pitch`。�
 | Pitch Corrected MIDI | `pitch_corrected_37key.mid` | 依偵測到的調性，修正不穩定音高並維持 37 鍵音域。 |
 | Final 37-Key MIDI | `final_37key.mid` | 完成最終平滑、最短音長處理與時間量化，作為主要遊戲版本。 |
 | Edited MIDI | `edited_37key.mid` | 在 Studio 的 MIDI Editor 刪除選取、重複或可疑音符後儲存的版本。 |
+
+## Timing system
+
+處理流程以 MIDI ticks 作為時間基準，並保留 PPQ（pulses per quarter note）與 tempo map。各階段從絕對 tick 位置重新計算 MIDI delta time，可避免反覆換算秒數所造成的累積時間漂移（cumulative timing drift）。
+
+Play to Game 仍可能依 `Chord gap ms` 刻意錯開同時按下的和弦音；這是播放階段的穩定性設定，不是 MIDI 時間逐步漂移。
 
 ## UI Tabs 說明
 
@@ -137,9 +160,9 @@ Studio 播放需要 `python-rtmidi` 可使用的 MIDI output（硬體或軟體�
 | Chord gap ms | 和弦按鍵間隔 | 將同時音符稍微錯開送出，降低遊戲漏掉和弦按鍵的機率。 | `18 ms` | 和弦漏音就提高；琶音感太明顯就降低。 |
 | Min hold ms | 最短按鍵時間 | 每個遊戲按鍵至少按住多久。 | `75 ms` | 短音無法觸發就提高；音符黏住或快速段落不清楚就降低。 |
 | Skip Cleanup | 略過清理 | 匯入 MIDI 時不執行 Cleanup，建立傳遞副本供下一階段使用。 | 關閉（Off） | MIDI 已經乾淨且完全符合 37 鍵時可開啟。 |
-| Skip Piano Arranger | 略過鋼琴編曲 | 匯入 MIDI 時不重新整理旋律、和聲與低音。 | 高品質編曲可開；複雜來源保持關閉。 | 原檔已是理想鋼琴譜，或 Arranger 反而刪掉重要聲部時。 |
-| Skip AI Optimizer | 略過 AI 最佳化 | 匯入 MIDI 時不執行所選 Optimizer。 | 想保守保留原編排時開啟。 | 已滿意 Clean／Arranged 結果，或不需要額外規則處理時。 |
-| Skip Pitch Correction | 略過音高修正 | 匯入 MIDI 時不依調性修正音符。 | 調性正確的商業 MIDI 可開啟。 | 原曲含轉調、借用和弦或刻意半音，避免被誤修時。 |
+| Skip Piano Arranger | 略過鋼琴編曲 | 匯入 MIDI 時不重新整理旋律、和聲與低音。 | 關閉（Off） | 原檔已是理想鋼琴譜，或 Arranger 反而刪掉重要聲部時開啟。 |
+| Skip AI Optimizer | 略過 AI 最佳化 | 匯入 MIDI 時不執行所選 Optimizer。 | 關閉（Off） | 已滿意 Clean／Arranged 結果，或想保守保留原編排時開啟。 |
+| Skip Pitch Correction | 略過音高修正 | 匯入 MIDI 時不依調性修正音符。 | 關閉（Off） | 原曲含轉調、借用和弦或刻意半音，避免被誤修時開啟。 |
 | Direct Preview after processing | 處理後立即預覽 | Process Imported MIDI 完成後自動預覽結果。 | 依個人習慣；預設關閉。 | 想每次完成後立即聽結果時開啟。 |
 
 `Range mode` 詳細差異：
@@ -194,10 +217,6 @@ Basic Pitch 是從音訊估計音高。鼓聲、殘響、人聲洩漏、失真�
 ### 9. 為什麼要看 Track + Channel？
 
 因為同一 Track 可能同時包含可播放與不可播放的 Channel。只看 Track 會把不同樂器混在一起，可能錯刪好聲部或把噪音聲部一起送進最佳化。
-
-### 10. 為什麼 Timing Fix 很重要？
-
-MIDI 的節奏不只是一串毫秒數，還包含 PPQ、tempo map 與 tick 位置。處理時若遺失這些關係，變速、轉換或重建後就可能出現拍點漂移。現有流程會保留來源 tick／tempo 資訊，並只在最終階段記錄與執行必要的時間量化，讓 A/B 比較與遊戲播放更可靠。
 
 ## 建議使用流程
 
@@ -279,12 +298,12 @@ OpenAI Optimizer 需要設定 `OPENAI_API_KEY`；未設定或請求失敗時會�
 
 以下為規劃項目，不代表目前已完整實作：
 
-- 更完整的 Track/Channel part selection，包括更直覺的聲部預聽、命名與選取流程。
+- Track/Channel part selection 強化：加入更直覺的聲部預聽、命名與選取流程。
 - Better Piano Arranger：改善旋律、和聲與低音判斷。
+- Better Piano Roll / Staff View：改善視覺排版、記譜資訊與編輯互動。
 - AI Repair：在 Studio／Editor 中提供可控的 AI 修復建議。
-- Better Staff View：改善排版、記譜資訊與編輯互動。
 - Multiple transcription engines：加入多種音訊轉錄引擎供比較與選擇。
-- Dataset builder：建立未來機器學習（ML）所需的資料集整理工具。
+- Dataset builder for future ML：建立未來機器學習所需的資料集整理工具。
 
 ## License
 
