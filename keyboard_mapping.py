@@ -13,7 +13,7 @@ EMPTY_CUSTOM_PROFILE = "Empty Custom"
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
-DEFAULT_NOTE_MAP = {
+STANDARD_37KEY_NOTE_MAP = {
     36: ",",
     37: "l",
     38: ".",
@@ -51,6 +51,10 @@ DEFAULT_NOTE_MAP = {
     70: "7",
     71: "u",
     72: "i",
+}
+DEFAULT_NOTE_MAP = {
+    note + 12: key
+    for note, key in STANDARD_37KEY_NOTE_MAP.items()
 }
 
 VALID_NAMED_KEYS = {
@@ -110,7 +114,7 @@ def default_mapping_profiles():
             DEFAULT_MAPPING_PROFILE, dict(DEFAULT_NOTE_MAP)
         ),
         STANDARD_MAPPING_PROFILE: MappingProfile(
-            STANDARD_MAPPING_PROFILE, dict(DEFAULT_NOTE_MAP)
+            STANDARD_MAPPING_PROFILE, dict(STANDARD_37KEY_NOTE_MAP)
         ),
         EMPTY_CUSTOM_PROFILE: MappingProfile(EMPTY_CUSTOM_PROFILE, {}),
     }

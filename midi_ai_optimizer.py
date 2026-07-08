@@ -153,16 +153,18 @@ def is_valid_note_dict(note, lowest, highest):
     )
 
 
-def validate_note_dicts(notes, note_map=None):
+def validate_note_dicts(notes, note_map=None, allow_out_of_range=False, skip_invalid=False):
     note_map = note_map or DEFAULT_NOTE_MAP
-    lowest = min(note_map)
-    highest = max(note_map)
+    lowest = 0 if allow_out_of_range else min(note_map)
+    highest = 127 if allow_out_of_range else max(note_map)
     if not isinstance(notes, list):
         raise ValueError("AI output must be a JSON list")
 
     validated = []
     for note in notes:
         if not isinstance(note, dict) or not is_valid_note_dict(note, lowest, highest):
+            if skip_invalid:
+                continue
             raise ValueError("AI output contains invalid notes")
         validated_note = {
                 "start_ms": int(note["start_ms"]),
@@ -629,8 +631,21 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     return output_midi
 
 
-def detect_song_key(notes, note_map=None):
-    notes = validate_note_dicts(notes, note_map=note_map)
+def detect_song_key(notes, note_map=None, allow_out_of_range=False, skip_invalid=False):
+    notes = validate_note_dicts(
+        notes,
+        note_map=note_map,
+        allow_out_of_range=allow_out_of_range,
+        skip_invalid=skip_invalid,
+    )
+    if not notes:
+        return {
+            "root": None,
+            "mode": "unknown",
+            "scale": set(),
+            "name": "Unknown",
+        }
+
     best_score = -1
     best_root = 0
     best_mode = "major"
@@ -761,7 +776,12 @@ def pitch_correct_37key_midi(input_midi, output_midi=None, options=None):
 
 
 def detect_key_for_midi(input_midi, note_map=None):
-    return detect_song_key(midi_notes_to_dicts(input_midi), note_map=note_map)["name"]
+    return detect_song_key(
+        midi_notes_to_dicts(input_midi),
+        note_map=note_map,
+        allow_out_of_range=True,
+        skip_invalid=True,
+    )["name"]
 
 
 def smooth_note_events(notes, options=None):
