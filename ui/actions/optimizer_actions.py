@@ -15,6 +15,7 @@ class UiOptimizerActionsMixin:
             self.analysis_vars["Keyboard Profile"].set(
                 f"{profile.name} ({profile.range_label})"
             )
+        self.on_mapping_keyboard_profile_changed()
 
     def on_processing_preset_changed(self, event=None):
         preset = self.processing_preset_var.get()

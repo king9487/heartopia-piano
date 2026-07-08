@@ -5,6 +5,7 @@ from ui.panels.cleanup_panel import build_cleanup_panel
 from ui.panels.analysis_panel import build_analysis_panel
 from ui.panels.convert_panel import build_convert_panel, build_import_panel
 from ui.panels.log_panel import build_log_panel
+from ui.panels.keyboard_mapping_panel import build_keyboard_mapping_panel
 from ui.panels.midi_panel import build_main_midi_panel, build_midi_sources_panel
 from ui.panels.settings_panel import build_settings_panel
 from ui.panels.studio_panel import build_studio_panel
@@ -147,12 +148,14 @@ def build_application_ui(app):
     import_tab = ttk.Frame(notebook)
     optimization_tab = ttk.Frame(notebook)
     playback_tab = ttk.Frame(notebook)
+    keyboard_mapping_tab = ttk.Frame(notebook)
     studio_tab = ttk.Frame(notebook)
     analysis_tab = ttk.Frame(notebook)
     notebook.add(main_tab, text="Main")
     notebook.add(import_tab, text="Import")
     notebook.add(optimization_tab, text="Optimization")
     notebook.add(playback_tab, text="Playback")
+    notebook.add(keyboard_mapping_tab, text="Keyboard Mapping")
     notebook.add(studio_tab, text="Studio")
     notebook.add(analysis_tab, text="Analysis")
     notebook.bind("<<NotebookTabChanged>>", app.on_notebook_tab_changed)
@@ -162,6 +165,7 @@ def build_application_ui(app):
     app.import_tab = import_tab
     app.optimization_tab = optimization_tab
     app.playback_tab = playback_tab
+    app.keyboard_mapping_tab = keyboard_mapping_tab
     app.cleanup_tab = optimization_tab
     app.studio_tab = studio_tab
     app.analysis_tab = analysis_tab
@@ -173,6 +177,7 @@ def build_application_ui(app):
         import_tab,
         optimization_tab,
         playback_tab,
+        keyboard_mapping_tab,
         studio_tab,
         analysis_tab,
     ):
@@ -188,6 +193,7 @@ def build_application_ui(app):
     build_cleanup_panel(app, tab_contents[optimization_tab])
     playback_row = build_midi_sources_panel(app, tab_contents[playback_tab])
     build_settings_panel(app, tab_contents[playback_tab], playback_row)
+    build_keyboard_mapping_panel(app, tab_contents[keyboard_mapping_tab])
     build_studio_panel(app, tab_contents[studio_tab])
     build_analysis_panel(app, tab_contents[analysis_tab], 0)
     _bind_tab_mousewheel(app.root, notebook, tab_canvases)

@@ -4,6 +4,7 @@ import tkinter as tk
 
 from midi_analysis import ANALYSIS_FIELDS
 from keyboard_profiles import DEFAULT_KEYBOARD_PROFILE
+from keyboard_mapping import DEFAULT_MAPPING_PROFILE, load_mapping_profiles
 from tools import default_demucs_device
 from converter import DEFAULT_SEPARATION_MODE, DEFAULT_SEPARATION_STEM
 
@@ -62,6 +63,9 @@ def initialize_app_state(app):
     app.chord_delay_var = tk.IntVar(value=18)
     app.min_hold_var = tk.IntVar(value=75)
     app.keyboard_profile_var = tk.StringVar(value=DEFAULT_KEYBOARD_PROFILE)
+    app.mapping_profile_var = tk.StringVar(value=DEFAULT_MAPPING_PROFILE)
+    app.active_mapping_profile_var = tk.StringVar(value=DEFAULT_MAPPING_PROFILE)
+    app.keyboard_mapping_profiles = load_mapping_profiles()
     app.processing_preset_var = tk.StringVar(value="Balanced")
     app.min_note_duration_var = tk.IntVar(value=35)
     app.velocity_threshold_var = tk.IntVar(value=12)
@@ -83,6 +87,7 @@ def initialize_app_state(app):
         field: tk.StringVar(value="--") for field in ANALYSIS_FIELDS
     }
     app.analysis_vars["Keyboard Profile"].set("Heartopia (C3-C6)")
+    app.analysis_vars["Mapping Profile"].set(DEFAULT_MAPPING_PROFILE)
     app.studio_position_var = tk.DoubleVar(value=0.0)
     app.studio_current_time_var = tk.StringVar(value="00:00.000")
     app.studio_total_time_var = tk.StringVar(value="00:00.000")
@@ -114,6 +119,7 @@ def initialize_app_state(app):
     app.cleanup_tab = None
     app.studio_tab = None
     app.analysis_tab = None
+    app.keyboard_mapping_tab = None
     app.log = None
     app.convert_button = None
     app.local_audio_button = None
@@ -130,6 +136,9 @@ def initialize_app_state(app):
     app.stop_button = None
     app.play_button = None
     app.midi_source_combo = None
+    app.mapping_profile_combo = None
+    app.playback_mapping_profile_combo = None
+    app.keyboard_mapping_tree = None
     app.compare_a_combo = None
     app.compare_b_combo = None
     app.cached_combo = None

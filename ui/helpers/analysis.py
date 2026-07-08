@@ -48,3 +48,6 @@ def update_analysis_from_midi_path(app, midi_path):
         app.analysis_vars["Keyboard Profile"].set(
             f"{profile.name} ({profile.range_label})"
         )
+    mapping_var = getattr(app, "mapping_profile_var", None)
+    if mapping_var is not None and "Mapping Profile" in app.analysis_vars:
+        app.analysis_vars["Mapping Profile"].set(mapping_var.get())

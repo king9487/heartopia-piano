@@ -51,6 +51,7 @@ GM_PROGRAM_NAMES = (
 MIDI_ANALYSIS_REPORT_NAME = "report.json"
 ANALYSIS_FIELDS = (
     "Keyboard Profile",
+    "Mapping Profile",
     "Song Duration",
     "Tempo",
     "Detected Key",

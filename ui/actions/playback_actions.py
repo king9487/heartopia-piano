@@ -59,9 +59,13 @@ class UiPlaybackActionsMixin:
         cleanup_settings = self.get_cleanup_settings()
         if cleanup_settings is None:
             return
+        mapping_profile = self.get_selected_mapping_profile()
 
         for timestamp, action, note, key in iter_note_events(
-            midi_path, **cleanup_settings
+            midi_path,
+            mapping_profile=mapping_profile,
+            log_callback=self.log_message,
+            **cleanup_settings,
         ):
             note_name = midi_note_name(note)
             self.log_message(
@@ -104,6 +108,7 @@ class UiPlaybackActionsMixin:
             return
 
         cleanup_settings = {}
+        mapping_profile = self.get_selected_mapping_profile()
         if not original_events:
             cleanup_settings = self.get_cleanup_settings()
             if cleanup_settings is None:
@@ -128,6 +133,7 @@ class UiPlaybackActionsMixin:
         self.log_message(
             f"{playback_label} will start in {countdown} seconds. Press F8 to stop."
         )
+        self.log_message(f"Mapping profile: {mapping_profile.name}")
         self.root.withdraw()
 
         thread = threading.Thread(
@@ -144,6 +150,7 @@ class UiPlaybackActionsMixin:
                 original_events,
                 original_part_filter,
                 original_range_mode,
+                mapping_profile,
             ),
             daemon=True,
         )
@@ -162,14 +169,18 @@ class UiPlaybackActionsMixin:
         original_events=False,
         original_part_filter=None,
         original_range_mode="keep",
+        mapping_profile=None,
     ):
         try:
+            log_callback = lambda message: self.queue.put(("log", message))
             if self.stop_event.wait(countdown):
                 self.queue.put(("play_done", None))
                 return
             if original_events:
                 play_original_midi_as_keyboard(
                     midi_path,
+                    mapping_profile=mapping_profile,
+                    log_callback=log_callback,
                     speed=speed,
                     stop_event=self.stop_event,
                     start_sec=start_sec,
@@ -180,6 +191,8 @@ class UiPlaybackActionsMixin:
             else:
                 play_midi_as_keyboard(
                     midi_path,
+                    mapping_profile=mapping_profile,
+                    log_callback=log_callback,
                     speed=speed,
                     stop_event=self.stop_event,
                     chord_delay=chord_delay,

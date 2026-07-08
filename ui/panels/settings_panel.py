@@ -85,6 +85,22 @@ def build_settings_panel(app, parent, start_row=0):
         row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     profile_combo.bind("<<ComboboxSelected>>", app.on_keyboard_profile_changed)
+
+    ttk.Label(panel, text="Mapping Profile").grid(
+        row=7, column=0, sticky="w", pady=(8, 0)
+    )
+    mapping_combo = ttk.Combobox(
+        panel,
+        textvariable=app.mapping_profile_var,
+        values=tuple(getattr(app, "keyboard_mapping_profiles", {})),
+        state="readonly",
+        width=22,
+    )
+    mapping_combo.grid(
+        row=7, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
+    )
+    mapping_combo.bind("<<ComboboxSelected>>", app.on_mapping_profile_changed)
+    app.playback_mapping_profile_combo = mapping_combo
     app.playback_advanced_settings = tuple(advanced_widgets)
     return start_row + 1
 

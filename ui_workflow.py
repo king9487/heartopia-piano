@@ -24,9 +24,11 @@ class UiWorkflowManager:
             "import": app.import_tab,
             "optimization": app.optimization_tab,
             "playback": app.playback_tab,
+            "keyboard_mapping": getattr(app, "keyboard_mapping_tab", None),
             "studio": app.studio_tab,
             "analysis": app.analysis_tab,
         }
+        self.tabs = {name: tab for name, tab in self.tabs.items() if tab is not None}
         self.sections = {
             "source_choices": app.input_source_choices,
             "conversion_options": app.conversion_options_frame,

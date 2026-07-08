@@ -14,6 +14,7 @@ from transpose import (
 )
 from ui.actions.convert_actions import UiConvertActionsMixin
 from ui.actions.editor_actions import UiEditorActionsMixin
+from ui.actions.mapping_actions import UiMappingActionsMixin
 from ui.actions.optimizer_actions import UiOptimizerActionsMixin
 from ui.actions.playback_actions import UiPlaybackActionsMixin
 from ui.actions.studio_actions import UiStudioActionsMixin
@@ -29,6 +30,7 @@ class YoutubeMidiApp(
     UiPlaybackActionsMixin,
     UiOptimizerActionsMixin,
     UiEditorActionsMixin,
+    UiMappingActionsMixin,
     UiStudioActionsMixin,
     UiQueueHandlersMixin,
     UiLogHelpersMixin,
@@ -77,6 +79,9 @@ class YoutubeMidiApp(
     chord_delay_var: Any
     min_hold_var: Any
     keyboard_profile_var: Any
+    mapping_profile_var: Any
+    active_mapping_profile_var: Any
+    keyboard_mapping_profiles: dict
     processing_preset_var: Any
     min_note_duration_var: Any
     velocity_threshold_var: Any

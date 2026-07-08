@@ -7,7 +7,10 @@ def build_analysis_panel(app, parent, row):
     groups = (
         (
             "Song Information",
-            ("Keyboard Profile", "Song Duration", "Tempo", "Detected Key"),
+            (
+                "Keyboard Profile", "Mapping Profile", "Song Duration",
+                "Tempo", "Detected Key",
+            ),
         ),
         (
             "MIDI Statistics",

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import keyboard
 import mido
 
+from keyboard_mapping import DEFAULT_NOTE_MAP, get_key_for_note
+
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 OCTAVE_FIT_OFF = "off"
@@ -25,52 +27,6 @@ DEFAULT_37KEY_CLEAN_OPTIONS = {
 }
 
 
-DEFAULT_NOTE_MAP = {
-    # Lower row in the game UI.
-    36: ",",  # C2, Do
-    37: "l",  # C#2 / Db2
-    38: ".",  # D2, Re
-    39: ";",  # D#2 / Eb2
-    40: "/",  # E2, Mi
-    41: "o",  # F2, Fa
-    42: "0",  # F#2 / Gb2
-    43: "p",  # G2, Sol
-    44: "-",  # G#2 / Ab2
-    45: "[",  # A2, La
-    46: "=",  # A#2 / Bb2
-    47: "]",  # B2, Si
-
-    # Middle row in the game UI.
-    48: "z",  # C3, Do
-    49: "s",  # C#3 / Db3
-    50: "x",  # D3, Re
-    51: "d",  # D#3 / Eb3
-    52: "c",  # E3, Mi
-    53: "v",  # F3, Fa
-    54: "g",  # F#3 / Gb3
-    55: "b",  # G3, Sol
-    56: "h",  # G#3 / Ab3
-    57: "n",  # A3, La
-    58: "j",  # A#3 / Bb3
-    59: "m",  # B3, Si
-
-    # Upper row in the game UI.
-    60: "q",  # C4, Do, middle C
-    61: "2",  # C#4 / Db4
-    62: "w",  # D4, Re
-    63: "3",  # D#4 / Eb4
-    64: "e",  # E4, Mi
-    65: "r",  # F4, Fa
-    66: "5",  # F#4 / Gb4
-    67: "t",  # G4, Sol
-    68: "6",  # G#4 / Ab4
-    69: "y",  # A4, La
-    70: "7",  # A#4 / Bb4
-    71: "u",  # B4, Si
-    72: "i",  # C5, Do
-}
-
-
 def midi_note_name(note):
     octave = (note // 12) - 1
     name = NOTE_NAMES[note % 12]
@@ -86,6 +42,9 @@ def is_note_off(message):
 def build_original_keyboard_schedule(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     speed=1.0,
     start_sec=None,
     end_sec=None,
@@ -95,7 +54,13 @@ def build_original_keyboard_schedule(
     """Map source note messages directly without rebuilding note objects."""
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
-    note_map = note_map or DEFAULT_NOTE_MAP
+    if mapping_profile is not None:
+        note_map = dict(mapping_profile.mappings)
+        keyboard_map = mapping_profile.keyboard_map
+    if note_map is None:
+        note_map = DEFAULT_NOTE_MAP
+    if keyboard_map is None:
+        keyboard_map = note_map
     range_start = 0.0 if start_sec is None else float(start_sec)
     range_end = None if end_sec is None else float(end_sec)
     if range_start < 0:
@@ -125,6 +90,7 @@ def build_original_keyboard_schedule(
     tempo_seconds = 0.0
     tempo = 500000
     selected_parts = set(part_filter) if part_filter is not None else None
+    skipped_notes = set()
     for absolute_tick, track_index, _event_index, message in sorted(note_messages):
         while (
             tempo_index < len(tempo_changes)
@@ -158,9 +124,18 @@ def build_original_keyboard_schedule(
         mapped_note = message.note
         if mapped_note not in note_map and out_of_range_mode == "octave_shift":
             mapped_note = octave_shift_note(mapped_note, note_map)
-        key = note_map.get(mapped_note)
+        if mapped_note is None:
+            continue
+        key = keyboard_map.get(mapped_note)
         if key is not None:
             schedule.append(((elapsed - range_start) / speed, action, mapped_note, key))
+        elif action == "down" and mapped_note not in skipped_notes:
+            skipped_notes.add(mapped_note)
+            message = f"Skipped unmapped note: {midi_note_name(mapped_note)}"
+            if log_callback is not None:
+                log_callback(message)
+            else:
+                print(message)
     return schedule
 
 
@@ -480,6 +455,9 @@ def convert_to_37key_midi(input_midi, output_midi, note_map=None, options=None):
 def build_clean_note_events(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     transpose=0,
     min_note_duration=0.0,
     velocity_threshold=0,
@@ -492,7 +470,13 @@ def build_clean_note_events(
     melody_max_notes=1,
     out_of_range_mode=None,
 ):
-    note_map = note_map or DEFAULT_NOTE_MAP
+    if mapping_profile is not None:
+        note_map = dict(mapping_profile.mappings)
+        keyboard_map = mapping_profile.keyboard_map
+    if note_map is None:
+        note_map = DEFAULT_NOTE_MAP
+    if keyboard_map is None:
+        keyboard_map = note_map
     if out_of_range_mode is not None:
         octave_fit_mode = out_of_range_mode
     clean_events = []
@@ -509,6 +493,7 @@ def build_clean_note_events(
 
     filtered_raw_events = drop_close_raw_repeated_notes(filtered_raw_events, merge_gap)
 
+    skipped_notes = set()
     for start, end, raw_note, velocity in filtered_raw_events:
         duration = end - start
         note = fit_note_to_map(
@@ -522,13 +507,23 @@ def build_clean_note_events(
         )
         if note is None:
             continue
+        key = get_key_for_note(mapping_profile, note) if mapping_profile is not None else keyboard_map.get(note)
+        if not key:
+            if note not in skipped_notes:
+                skipped_notes.add(note)
+                message = f"Skipped unmapped note: {midi_note_name(note)}"
+                if log_callback is not None:
+                    log_callback(message)
+                else:
+                    print(message)
+            continue
 
         clean_events.append(
             CleanNoteEvent(
                 start=start,
                 end=end,
                 note=note,
-                key=note_map[note],
+                key=key,
                 velocity=velocity,
             )
         )
@@ -547,6 +542,9 @@ def build_clean_note_events(
 def iter_note_events(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     transpose=0,
     min_note_duration=0.0,
     velocity_threshold=0,
@@ -562,6 +560,9 @@ def iter_note_events(
     note_events = build_clean_note_events(
         midi_path,
         note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+        log_callback=log_callback,
         transpose=transpose,
         min_note_duration=min_note_duration,
         velocity_threshold=velocity_threshold,
@@ -587,6 +588,9 @@ def iter_note_events(
 def preview_midi_keyboard(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     limit=80,
     transpose=0,
     min_note_duration=0.0,
@@ -605,6 +609,9 @@ def preview_midi_keyboard(
     for timestamp, action, note, key in iter_note_events(
         midi_path,
         note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+        log_callback=log_callback,
         transpose=transpose,
         min_note_duration=min_note_duration,
         velocity_threshold=velocity_threshold,
@@ -631,6 +638,9 @@ def preview_midi_keyboard(
 def build_keyboard_schedule(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     speed=1.0,
     chord_delay=0.018,
     min_hold=0.075,
@@ -666,6 +676,9 @@ def build_keyboard_schedule(
     note_events = build_clean_note_events(
         midi_path,
         note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+        log_callback=log_callback,
         transpose=transpose,
         min_note_duration=min_note_duration,
         velocity_threshold=velocity_threshold,
@@ -701,6 +714,9 @@ def build_keyboard_schedule(
 def play_midi_as_keyboard(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     speed=1.0,
     stop_event=None,
     chord_delay=0.018,
@@ -727,6 +743,9 @@ def play_midi_as_keyboard(
     schedule = build_keyboard_schedule(
         midi_path,
         note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+        log_callback=log_callback,
         speed=speed,
         chord_delay=chord_delay,
         min_hold=min_hold,
@@ -772,6 +791,9 @@ def play_midi_as_keyboard(
 def play_original_midi_as_keyboard(
     midi_path,
     note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    log_callback=None,
     speed=1.0,
     stop_event=None,
     start_sec=None,
@@ -781,7 +803,8 @@ def play_original_midi_as_keyboard(
 ):
     """Play source note_on/note_off messages with no RuleNote cleanup path."""
     schedule = build_original_keyboard_schedule(
-        midi_path, note_map=note_map, speed=speed,
+        midi_path, note_map=note_map, mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map, log_callback=log_callback, speed=speed,
         start_sec=start_sec, end_sec=end_sec,
         part_filter=part_filter, out_of_range_mode=out_of_range_mode,
     )
