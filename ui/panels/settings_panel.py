@@ -1,17 +1,22 @@
 from tkinter import ttk
 
+from keyboard_profiles import KEYBOARD_PROFILES
+
 
 def build_settings_panel(app, parent, start_row=0):
     panel = ttk.LabelFrame(parent, text="Playback Settings", padding=12)
     panel.grid(row=start_row, column=0, sticky="new", padx=12, pady=(0, 12))
     panel.columnconfigure(1, weight=1)
 
-    ttk.Checkbutton(
+    advanced_widgets = []
+    always_top = ttk.Checkbutton(
         panel,
         text="Always on top",
         variable=app.always_top_var,
         command=app.apply_topmost,
-    ).grid(row=0, column=0, columnspan=2, sticky="w")
+    )
+    always_top.grid(row=0, column=0, columnspan=2, sticky="w")
+    advanced_widgets.append(always_top)
     ttk.Label(panel, text="Speed").grid(row=1, column=0, sticky="w", pady=(10, 0))
     ttk.Spinbox(
         panel,
@@ -21,15 +26,18 @@ def build_settings_panel(app, parent, start_row=0):
         textvariable=app.speed_var,
         width=8,
     ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
-    ttk.Label(panel, text="Focus delay").grid(row=2, column=0, sticky="w", pady=(8, 0))
-    ttk.Spinbox(
+    focus_label = ttk.Label(panel, text="Focus delay")
+    focus_label.grid(row=2, column=0, sticky="w", pady=(8, 0))
+    focus_input = ttk.Spinbox(
         panel,
         from_=1,
         to=10,
         increment=1,
         textvariable=app.countdown_var,
         width=8,
-    ).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    )
+    focus_input.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    advanced_widgets.extend((focus_label, focus_input))
     ttk.Label(panel, text="Transpose").grid(row=3, column=0, sticky="w", pady=(8, 0))
     ttk.Spinbox(
         panel,
@@ -39,24 +47,45 @@ def build_settings_panel(app, parent, start_row=0):
         textvariable=app.transpose_var,
         width=8,
     ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-    ttk.Label(panel, text="Chord gap ms").grid(row=4, column=0, sticky="w", pady=(8, 0))
-    ttk.Spinbox(
+    chord_label = ttk.Label(panel, text="Chord gap ms")
+    chord_label.grid(row=4, column=0, sticky="w", pady=(8, 0))
+    chord_input = ttk.Spinbox(
         panel,
         from_=0,
         to=80,
         increment=2,
         textvariable=app.chord_delay_var,
         width=8,
-    ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-    ttk.Label(panel, text="Min hold ms").grid(row=5, column=0, sticky="w", pady=(8, 0))
-    ttk.Spinbox(
+    )
+    chord_input.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    hold_label = ttk.Label(panel, text="Min hold ms")
+    hold_label.grid(row=5, column=0, sticky="w", pady=(8, 0))
+    hold_input = ttk.Spinbox(
         panel,
         from_=20,
         to=250,
         increment=5,
         textvariable=app.min_hold_var,
         width=8,
-    ).grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    )
+    hold_input.grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    advanced_widgets.extend((chord_label, chord_input, hold_label, hold_input))
+
+    ttk.Label(panel, text="Keyboard Profile").grid(
+        row=6, column=0, sticky="w", pady=(8, 0)
+    )
+    profile_combo = ttk.Combobox(
+        panel,
+        textvariable=app.keyboard_profile_var,
+        values=tuple(KEYBOARD_PROFILES),
+        state="readonly",
+        width=22,
+    )
+    profile_combo.grid(
+        row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
+    )
+    profile_combo.bind("<<ComboboxSelected>>", app.on_keyboard_profile_changed)
+    app.playback_advanced_settings = tuple(advanced_widgets)
     return start_row + 1
 
 

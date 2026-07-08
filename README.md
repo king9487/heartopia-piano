@@ -1,268 +1,37 @@
-# Heartopia Piano Studio
-
-Heartopia Piano Studio 是一套為《心動小鎮》（Heartopia）37 鍵鋼琴設計的 MIDI 最佳化、分析、編輯與播放工具。它支援 YouTube、音訊檔與現有 MIDI，不再只是一個 YouTube to MIDI converter。
-
-> English summary: A Windows tool for converting, analyzing, optimizing, editing, previewing, and playing MIDI on Heartopia's 37-key piano (`C2`–`C5`).
-
-## 專案概覽
-
-本專案的核心目標，是把不同來源的音樂整理成適合 Heartopia 37 鍵鋼琴的版本，並協助使用者理解每個處理階段造成的變化。
-
-Heartopia Piano Studio **不只是一個 YouTube-to-MIDI converter**。它同時支援 YouTube、本機音訊（local audio）與外部 MIDI（external MIDI），可以將音訊轉錄成 MIDI，也可以直接播放或進一步整理既有 MIDI。最終目標是產生適合 Heartopia 37 鍵鋼琴播放的版本。
-
-## 功能總覽
-
-- YouTube 音訊下載（YouTube audio download）
-- 本機音訊匯入（local audio import）
-- 外部 MIDI 匯入（external MIDI import）
-- 匯入 MIDI 直接播放（Direct Play）
-- Demucs 音軌分離（source separation）
-- Basic Pitch 音訊轉錄（transcription）
-- 37 鍵清理（37-key cleanup）
-- 鋼琴編曲（Piano Arranger）
-- AI 最佳化（AI Optimizer，支援 Rule／OpenAI 模式）
-- 音高修正（Pitch Correction）
-- MIDI 工作室（MIDI Studio）
-- MIDI 編輯器（MIDI Editor）
-- 版本比較（A/B Compare）
-- 以電腦鍵盤播放到遊戲（keyboard playback／Play to Game）
-
-## 輸入工作流程
-
-### YouTube／Audio workflow
-
-- 將 YouTube 或本機音訊分離音軌（Demucs），再轉錄為 MIDI（Basic Pitch）。
-- YouTube 來源會先由 `yt-dlp` 下載音訊；本機 Audio File 則直接使用所選檔案。
-- 兩者之後都會經過 `Demucs → Basic Pitch → 37-key pipeline`。
-- 此流程需要 FFmpeg 與相關模型；YouTube 下載另需要網路。
-
-### External MIDI direct play workflow
-
-1. 匯入 `.mid` 或 `.midi`。
-2. 在 Import 分頁檢查 Track、Channel、音域與可播放比例。
-3. 勾選 Direct Play 要使用的 `Track + Channel` 聲部，並選擇如何處理超出 37 鍵的音。
-4. 使用 Preview Original 或 Play Original，不必先執行完整最佳化。
-
-### External MIDI optimize workflow
-
-1. 匯入 `.mid` 或 `.midi`，勾選 Optimization 要使用的 `Track + Channel` 聲部。
-2. 選擇 Preset、Cleanup、Piano Arranger、AI Optimizer 與 Pitch Correction 設定。
-3. 執行 Process Imported MIDI，建立適合 Heartopia 的 37 鍵版本。
-4. 使用 A/B Compare、Studio 或 MIDI Editor 檢查結果，再 Play to Game。
-
-MIDI Track 不一定等於人耳理解的「一個樂器」或「一個聲部」。同一個 Track 內可能包含多個 Channel，因此實際聲部可能是 `Track + Channel` 的組合。Import 分頁會同時分析兩者，並讓 Direct Play 與 Optimization 各自選取要使用的 Track/Channel 聲部。
-
-## MIDI Track / Channel 說明
-
-假設匯入檔案的分析結果如下：
-
-```text
-Track 0 Channel 0 = 618 notes
-Track 0 Channel 1 = 517 notes
-Track 1 Channel 0 = 312 notes
-```
-
-- Track 是 MIDI 檔案中的容器或層（container/layer），用來收納事件。
-- Channel 是 Track 內實際標記樂器或聲部的通道。檔案內使用 `0`–`15`，一般 MIDI 介面常顯示為 `1`–`16`。
-- 同一 Track 可同時包含多個 Channel；不同 Track 也可能使用同一 Channel。
-- 有些 MIDI 編輯器按 Channel 顯示聲部，而不是按 Track 顯示，所以它顯示的「軌數」可能與本程式不同。
-
-以上範例中，不能因 Track 0 總音符很多就整軌捨棄：`Track 0 / Channel 0` 有大量超出 37 鍵的音，但 `Track 0 / Channel 1` 是可播放聲部。因此程式以 `Track + Channel` 分析與篩選，避免把可用聲部一起刪掉。
-
-## 處理流程 Pipeline
-
-```text
-Input
-  ↓
-Clean 37-Key MIDI
-  ↓
-Piano Arranged MIDI
-  ↓
-AI Optimized MIDI
-  ↓
-Pitch Corrected MIDI
-  ↓
-Final 37-Key MIDI
-  ↓
-Edited MIDI
-  ↓
-Play to Game
-```
-
-YouTube 與 Audio 在進入上圖前，會先經過 `Demucs → Basic Pitch`。匯入 MIDI 則從 MIDI 分析與處理直接開始。Imported MIDI 的處理階段可個別略過；略過時仍會建立對應的傳遞副本（pass-through copy），以保持後續檔名與版本選擇一致。Edited MIDI 是使用編輯器後才會產生的選用階段。
-
-各輸出用途如下：
-
-| 輸出 | 常見檔名 | 說明 |
-|---|---|---|
-| Imported MIDI | `imported.mid` | 匯入 MIDI 的工作副本；可直接預覽、開啟或播放。若選取部分 Track/Channel，處理流程另會建立 `selected_parts.mid`。 |
-| Clean 37-Key MIDI | `clean_37key.mid` | 移除過短／過弱音符、處理超出音域的音，並依設定限制過密音符。 |
-| Piano Arranged MIDI | `piano_arranged_37key.mid` | 依 `original`、`melody_only` 或 `piano_cover` 編曲風格整理旋律、和聲與低音。 |
-| AI Optimized MIDI | `ai_optimized_37key.mid` | 依 `None`、`Rule` 或 `OpenAI` 模式最佳化；OpenAI 無法使用時會回退至本機規則。 |
-| Pitch Corrected MIDI | `pitch_corrected_37key.mid` | 依偵測到的調性，修正不穩定音高並維持 37 鍵音域。 |
-| Final 37-Key MIDI | `final_37key.mid` | 完成最終平滑、最短音長處理與時間量化，作為主要遊戲版本。 |
-| Edited MIDI | `edited_37key.mid` | 在 Studio 的 MIDI Editor 刪除選取、重複或可疑音符後儲存的版本。 |
-
-## Timing system
-
-處理流程以 MIDI ticks 作為時間基準，並保留 PPQ（pulses per quarter note）與 tempo map。各階段從絕對 tick 位置重新計算 MIDI delta time，可避免反覆換算秒數所造成的累積時間漂移（cumulative timing drift）。
-
-Play to Game 仍可能依 `Chord gap ms` 刻意錯開同時按下的和弦音；這是播放階段的穩定性設定，不是 MIDI 時間逐步漂移。
-
-## UI Tabs 說明
-
-### Main
-
-主要輸入與目前 MIDI 控制。可選擇 YouTube Video、Audio File 或 MIDI File；也可開啟、預覽目前 MIDI、播放到遊戲或停止工作。YouTube／Audio 的 Demucs 裝置與是否轉錄 vocals 也在此設定。
-
-### Import
-
-用於匯入 MIDI 的分析與直接播放。顯示檔名、時間、速度、調性、Track、PPQ、音符數、可播放比例，以及各 `Track + Channel` 的樂器、音域與超界音符。可分別勾選 Direct Play／Optimization 要使用的聲部，並選擇保留、移調或丟棄超界音符。
-
-### Optimization
-
-用於 Cleanup、Piano Arranger、AI Optimizer、Pitch Correction 與調性移調（Key Transpose）。可套用 Preset，也可重建 Clean、Piano Arranged 或 Final 階段。
-
-### Playback
-
-用於版本選擇與遊戲播放。可控制 Speed、Focus delay、Transpose、Chord gap、Min hold，選擇過去的 `output/` 資料夾，並用 A/B Compare 比較兩個 MIDI 版本。按 `F8` 可停止 Play to Game。
-
-### Studio
-
-提供可定位的 MIDI 播放、時間軸（Timeline）、Piano Roll、五線譜檢視（Staff View）、範圍播放／匯出，以及 MIDI Editor。Editor 可標記可疑音符並刪除選取、重複或可疑音符。AI Repair 尚未實作，列於 Roadmap。
-
-Studio 播放需要 `python-rtmidi` 可使用的 MIDI output（硬體或軟體合成器）；它與向 Heartopia 傳送電腦鍵盤事件的 Play to Game 不同。
-
-### Analysis
-
-顯示 `report.json` 中的音符數、歌曲時間、速度、偵測調性、各轉換階段統計、Piano Arranger 統計與除錯資訊。若選擇的資料夾沒有報告，面板不會自行猜測缺少的流程資料。
-
-## 重要設定說明
-
-下表的「建議值」以目前預設的 Balanced 工作方式為起點，不是所有歌曲的唯一正解。先用建議值試聽，再小幅調整，通常比一次改很多參數更容易找出原因。
-
-| Setting | 中文名稱 | 用途 | 建議值 | 什麼時候要調整 |
-|---|---|---|---|---|
-| Preset | 處理預設 | 一次套用 Cleanup、Arranger 與 Optimizer 的一組設定。 | `Balanced`；高品質 MIDI 可試 `Safe`。 | 想快速切換保守、平衡、強力清理或 Piano Cover 時。 |
-| Min note ms | 最短音符長度 | 移除短於指定毫秒數的音符。 | `35 ms` | 雜碎短音多就提高；裝飾音被吃掉就降低。 |
-| Velocity threshold | 力度門檻 | 移除 velocity 低於門檻的弱音。 | `12` | 幽靈音／雜音多就提高；弱奏消失就降低。 |
-| Range mode | 音域處理模式 | 決定 37 鍵外的音符如何處理。 | `smart` | 旋律被刪、低音錯位或八度移動太多時，改用 `drop` 或 `octave_shift` 比較。 |
-| Melody only | 僅保留旋律 | Cleanup 時依時間窗保留較高音，捨棄大部分伴奏。 | 關閉（Off） | 只想演奏主旋律，或來源和聲過度複雜時開啟。 |
-| Melody notes | 旋律音符數 | Piano Arranger 每個時間窗最多保留的重點音符數。 | `3`；Piano Cover 可用 `2` | 和弦太密就降低；旋律／和聲太薄就提高。 |
-| Melody window ms | 旋律時間窗 | 將時間相近的音符視為同一組來挑選與編排。 | `80 ms` | 快歌誤合併可降低；輕微不同步的和弦沒被視為一組可提高。 |
-| Arrangement style | 編曲風格 | `original` 保留清理後內容；`melody_only` 抽取高音旋律；`piano_cover` 產生旋律主導、簡化和聲與低音的版本。 | `piano_cover` | 高品質成品 MIDI 用 `original`；只要主旋律用 `melody_only`。 |
-| Optimizer mode | 最佳化模式 | `None` 不做額外最佳化；`Rule` 使用本機規則；`OpenAI` 使用 API，失敗時回退至 Rule。 | `Rule` | 已整理好的 MIDI 可用 `None`；想試模型判斷且已設定 `OPENAI_API_KEY` 時用 `OpenAI`。 |
-| Original Key | 原始調性 | 指定來源大調，或讓程式自動偵測。 | `Auto Detect` | 自動偵測結果明顯錯誤時手動指定。 |
-| Target Key | 目標調性 | 將 MIDI 轉至指定大調；`Original` 不做調性移調。 | `Original` | 想配合其他樂器／人聲，或某調在 37 鍵上更好配置時。 |
-| Speed | 播放速度 | 控制 Play to Game 的播放倍率。 | `1.0` | 遊戲漏音、電腦較慢或練習時降低；確認穩定後再提高。 |
-| Focus delay | 聚焦倒數 | 開始播放前等待幾秒，讓你切回並聚焦遊戲視窗。 | `3 秒` | 來不及切回遊戲就提高。 |
-| Transpose | 即時移調 | Play to Game 時以半音為單位移調，不改寫 MIDI 檔。 | `0` | 想臨時換調或修正鍵位，但不想產生新檔時。 |
-| Chord gap ms | 和弦按鍵間隔 | 將同時音符稍微錯開送出，降低遊戲漏掉和弦按鍵的機率。 | `18 ms` | 和弦漏音就提高；琶音感太明顯就降低。 |
-| Min hold ms | 最短按鍵時間 | 每個遊戲按鍵至少按住多久。 | `75 ms` | 短音無法觸發就提高；音符黏住或快速段落不清楚就降低。 |
-| Skip Cleanup | 略過清理 | 匯入 MIDI 時不執行 Cleanup，建立傳遞副本供下一階段使用。 | 關閉（Off） | MIDI 已經乾淨且完全符合 37 鍵時可開啟。 |
-| Skip Piano Arranger | 略過鋼琴編曲 | 匯入 MIDI 時不重新整理旋律、和聲與低音。 | 關閉（Off） | 原檔已是理想鋼琴譜，或 Arranger 反而刪掉重要聲部時開啟。 |
-| Skip AI Optimizer | 略過 AI 最佳化 | 匯入 MIDI 時不執行所選 Optimizer。 | 關閉（Off） | 已滿意 Clean／Arranged 結果，或想保守保留原編排時開啟。 |
-| Skip Pitch Correction | 略過音高修正 | 匯入 MIDI 時不依調性修正音符。 | 關閉（Off） | 原曲含轉調、借用和弦或刻意半音，避免被誤修時開啟。 |
-| Direct Preview after processing | 處理後立即預覽 | Process Imported MIDI 完成後自動預覽結果。 | 依個人習慣；預設關閉。 | 想每次完成後立即聽結果時開啟。 |
-
-`Range mode` 詳細差異：
-
-- `smart`：只將距離 37 鍵範圍不超過兩個八度的超界音移入範圍；太遠的音會丟棄，較能避免極端音高被硬塞進來。
-- `drop`：直接刪除所有超出 `C2`–`C5` 的音符，音高最忠實，但可能失去低音或旋律。
-- `octave_shift`：將超界音以八度移入範圍，通常保留最多音符，但可能造成音域擁擠或聲部交錯。
-
-## Direct Play vs Optimize
-
-| 模式 | 使用內容 | 適合情況 |
-|---|---|---|
-| Direct Play | 直接使用匯入 MIDI 中勾選的 Track/Channel 聲部；可選擇保留、八度移調或丟棄超界音。 | MuseScore 匯出、商業 MIDI、已整理好的 37 鍵譜，或只想快速試播。 |
-| Optimize for Heartopia | 將勾選聲部寫入工作檔，依序產生 37 鍵最佳化階段。 | 音符過密、超界音多、聲部複雜或需要 Piano Arranger 的 MIDI。 |
-
-高品質 MIDI 不一定需要最佳化。若原檔已經是清楚的鋼琴編曲，先 Preview Original 與 Play Original；反之，Basic Pitch 產生或來源複雜的 MIDI，通常需要 Cleanup 或 Piano Arranger。最佳判斷方式是 A/B Compare，而不是把所有階段一律打開。
-
-## 常見問題 FAQ
-
-### 1. 為什麼匯入 MIDI 後音符數量和其他軟體看到的不一樣？
-
-不同軟體可能只計算特定 Track、Channel、可見聲部或有效 note-on 事件。本程式會分別統計總音符、37 鍵內音符與超界音符；若選取部分 Track/Channel，播放或處理數量也會再改變。
-
-### 2. 為什麼 Track 數量不一樣？
-
-MIDI 檔案的實體 Track 與編輯器畫面上的聲部不一定一對一。有些軟體會按 Channel、樂器或五線譜拆分顯示，所以畫面看到的軌數不等於檔案內 Track 數。
-
-### 3. 為什麼有些音會不見？
-
-常見原因是音符低於 Min note ms／Velocity threshold、超出 37 鍵後被 `drop` 或 `smart` 丟棄、密度限制、Melody Only、Piano Arranger 簡化，或該 Track/Channel 沒有被勾選。可依序比較 Imported、Clean、Arranged 與 Final 找出發生階段。
-
-### 4. 為什麼 Play Original 和 Final 聽起來不一樣？
-
-Play Original 使用匯入聲部與直接播放音域設定；Final 則可能經過 Cleanup、Piano Arranger、Optimizer、Pitch Correction、最短音長與時間量化。它們代表「來源」與「遊戲最佳化結果」，本來就可能不同。
-
-### 5. 什麼時候要用 Piano Cover？
-
-當來源是多樂器、和弦密集或不是專為鋼琴編寫，想保留主旋律並簡化和聲與低音時使用。若原檔已是成熟鋼琴編曲，先試 `original`。
-
-### 6. 什麼時候要用 Melody Only？
-
-只想演奏主旋律、伴奏太複雜，或 37 鍵無法容納完整編曲時使用。它會主動犧牲和聲，因此不適合需要完整鋼琴質感的歌曲。
-
-### 7. Range mode 的 smart／drop／octave_shift 差在哪？
-
-`smart` 只搬移距離合理的超界音並丟棄極端音；`drop` 完全刪除超界音；`octave_shift` 儘量把所有超界音用八度移回。一般先用 `smart`，再依漏音或音域擁擠情況比較另外兩種。
-
-### 8. 為什麼 Basic Pitch 轉出來會有雜音？
-
-Basic Pitch 是從音訊估計音高。鼓聲、殘響、人聲洩漏、失真、多樂器重疊與 Demucs 分離殘留，都可能被判定成短音或弱音。可提高 Min note ms／Velocity threshold、使用 Piano Cover，並在 Editor 刪除可疑音符。
-
-### 9. 為什麼要看 Track + Channel？
-
-因為同一 Track 可能同時包含可播放與不可播放的 Channel。只看 Track 會把不同樂器混在一起，可能錯刪好聲部或把噪音聲部一起送進最佳化。
-
-## 建議使用流程
-
-### 高品質 MIDI
-
-```text
-Import MIDI
-→ Preview Original
-→ Play Original
-→ Editor if needed
-```
-
-先確認 Track/Channel 勾選與超界音處理。若原檔已適合 37 鍵，不必為了「跑完整流程」而強制最佳化。
-
-### 普通 MIDI
-
-```text
-Import MIDI
-→ Analyze Track/Channel
-→ Process Imported MIDI
-→ A/B Compare
-→ Editor
-→ Play to Game
-```
-
-先排除不需要的聲部，再從 Balanced 開始。若結果損失太多，可改 Safe、`original`，或略過個別階段。
-
-### YouTube / Audio
-
-```text
-YouTube or Audio
-→ Demucs
-→ Basic Pitch
-→ Piano Arranger
-→ Final
-→ Editor
-→ Play
-```
-
-音訊轉錄通常比現成 MIDI 更容易出現雜音，建議查看 Analysis 並比較 Clean、Piano Arranged 與 Final。
-
-## 安裝與執行 Installation
-
-需求：Windows、64-bit Python 3.11、內建於 Python 安裝程式的 Tcl/Tk（Tkinter）、FFmpeg／FFprobe，以及 `requirements.txt` 中的套件。Python 3.11 是目前 Basic Pitch 0.4.0、TensorFlow 2.15.0 與 GPU 套件組合的支援版本。
-
-`requirements.txt` 預設以 NVIDIA CUDA 12.1 安裝相容且版本配對的 PyTorch／torchaudio，並使用 `onnxruntime-gpu`（不與 `onnxruntime` CPU 套件並裝）。CPU-only 系統需將 CUDA 版 `torch`／`torchaudio` 改為 PyTorch 官方相容的 CPU 版本。Pillow、pygame 與 `ffmpeg-python` 目前未被程式使用，因此不列入依賴；FFmpeg 是獨立的系統工具。
+# Heartopia Piano Studio 使用者指南
+
+Heartopia Piano Studio 是一套 Windows 桌面工具，可將 YouTube、音訊檔或既有 MIDI 轉換、整理、分析、編輯並播放到《心動小鎮》（Heartopia）的鋼琴。預設 `Heartopia` 鍵盤設定是 37 鍵、MIDI note `48–84`，即 `C3–C6`。
+
+本指南以目前 Tkinter UI 的實際功能為準。介面文字保留 English，說明使用繁體中文。
+
+## 目錄
+
+- [安裝與啟動](#安裝與啟動)
+- [第一次使用](#第一次使用)
+- [完整處理流程](#完整處理流程)
+- [Playback Workflow](#playback-workflow)
+- [Main 分頁](#main-分頁)
+- [Import 分頁](#import-分頁)
+- [Optimization 分頁](#optimization-分頁)
+- [Playback 分頁](#playback-分頁)
+- [Studio 分頁](#studio-分頁)
+- [Analysis 分頁](#analysis-分頁)
+- [所有輸出檔案](#所有輸出檔案)
+- [建議設定](#建議設定)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+
+## 安裝與啟動
+
+### 系統需求
+
+- Windows
+- 64-bit Python；目前 dependency 組合以 Python 3.11 最合適
+- Python 安裝中的 Tcl/Tk（Tkinter）
+- FFmpeg 與 FFprobe，且能從 `PATH` 執行
+- YouTube 轉換需要網路
+- 預設 `requirements.txt` 使用 NVIDIA CUDA 12.1 的 PyTorch；CPU-only 電腦需自行改裝相容的 PyTorch CPU build
+- Studio 聲音預聽需要可用的 MIDI output（硬體 MIDI port 或 software synthesizer）
 
 安裝 FFmpeg：
 
@@ -270,18 +39,10 @@ YouTube or Audio
 winget install --id Gyan.FFmpeg -e --source winget
 ```
 
-自動建立環境（會重建 `.venv`）：
+建立環境並安裝 dependency。注意：`setup.ps1` 會刪除並重建現有 `.venv`：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
-```
-
-或手動建立乾淨環境：
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 啟動桌面 UI：
@@ -290,21 +51,529 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe .\youtube_to_midi.py
 ```
 
-或執行 `start_ui.bat`。CLI 可使用 `start_cli.bat`，但外部 MIDI 匯入目前由桌面 UI 提供。輸出會儲存在 `output/`。
+也可雙擊 `start_ui.bat`。`start_cli.bat` 是 CLI 入口；本指南聚焦桌面 UI。
 
-OpenAI Optimizer 需要設定 `OPENAI_API_KEY`；未設定或請求失敗時會回退至本機 Rule 模式。
+若要使用 **Experimental — OpenAI Optimizer**，啟動前設定：
+
+```powershell
+$env:OPENAI_API_KEY="你的 API key"
+```
+
+這個模式會把每個音符的時間、長度、音高與 velocity 送到 OpenAI API；API 不可用、回傳無效或未設定 key 時，程式會自動改用本機 Rule optimizer。
+
+## 第一次使用
+
+最穩妥的入門流程：
+
+1. 保持頂端的 `Studio Mode`，以便看見完整介面。
+2. 到 `Main` 選 `MIDI File`，按 `Import MIDI...` 匯入一個 `.mid` 或 `.midi`。
+3. 到 `Import` 查看可播放比例；在 `Use Direct` 與 `Use Optimization` 欄選擇要保留的 Track/Channel 聲部。
+4. 到 `Optimization` 選 `Balanced`。
+5. 回到 `Import` 按 `Process Imported MIDI`。
+6. 到 `Playback` 的 `MIDI source` 選 `Final MIDI`，再回 `Main` 按 `Play to Game`。
+7. 倒數期間切回遊戲並把焦點放在鋼琴視窗；播放中按 `F8` 可停止。
+
+若來源是 YouTube 或音訊，使用 `Demucs vocals only`、`no_vocals`、`Balanced` 作為起點即可。
+
+## 完整處理流程
+
+### YouTube / Audio 流程
+
+```text
+YouTube URL ──yt-dlp──┐
+                     ├→ song.wav
+Local Audio ─FFmpeg──┘
+  → 可選的 Demucs source separation
+  → 選定 stem
+  → Basic Pitch transcription（Raw MIDI）
+  → Clean 37-Key
+  → Piano Arranger
+  → AI Optimizer（Rule 或 Experimental OpenAI）
+  → Pitch Correction
+  → Final smoothing
+  → Preview / Studio / Editor / Play to Game
+```
+
+1. YouTube 由 `yt-dlp` 取得音訊；本機音訊由 FFmpeg 轉為工作用 `song.wav`。
+2. `Separation Mode` 決定是否以 Demucs 拆分音軌。
+3. `Stem to Convert` 決定送入 Basic Pitch 的音軌。
+4. Basic Pitch 將音訊轉錄為 Raw MIDI。
+5. Cleanup、Arranger、Optimizer、Pitch Correction 與 Final smoothing 依序建立不同版本。
+6. 若開啟 `Convert vocals MIDI` 且 separation 有產生 `vocals.wav`，vocals 也會另外跑一套相同 MIDI pipeline。
+
+### External MIDI 流程
+
+```text
+原始 .mid/.midi
+  → imported.mid（工作副本）
+  → Track/Channel 選取與越界處理
+  → selected_parts.mid
+  → clean_37key.mid
+  → piano_arranged_37key.mid
+  → ai_optimized_37key.mid
+  → pitch_corrected_37key.mid
+  → final_37key.mid
+  → 可選：transposed / chorus / edited
+```
+
+External MIDI 可先 Direct Play，不必處理完整 pipeline。勾選 Skip 時，程式仍會建立該階段的 pass-through copy，讓後續檔名與版本選單保持完整；`final_37key.mid` 一律會建立。
+
+### Timing 與 MIDI 資訊保留
+
+核心處理使用 MIDI ticks、原 PPQ 與 tempo map 計時，再重建 delta time。部分轉換階段會把內容整理成單一 note track，因此原始 Track、Channel、program、sustain/control change 等演奏資訊不保證全部保留。需要原始事件時請使用 `Full Imported MIDI` 或 Import 的 `Play Original`。
+
+## Playback Workflow
+
+視窗最上方有兩個 radio button；它們只改變 UI 顯示方式，不改寫 MIDI。
+
+| 選項 | 實際效果 | 適合情境 |
+|---|---|---|
+| `Quick Play` | 只顯示 Main、Import、Playback，並隱藏來源選擇、進階 conversion/import/compare/log 設定；切換時回到 Main | 已經選好來源與設定，只想快速 `Play to Game` |
+| `Studio Mode` | 顯示全部六個分頁與所有控制項；預設模式 | 第一次使用、轉換、分析、編輯與除錯 |
+
+`Quick Play` 不會重設先前設定。若要換來源、查看 Import 分析或調整完整參數，切回 `Studio Mode`。
+
+## Main 分頁
+
+![Main 分頁截圖（待補）](docs/screenshots/main.png)
+
+Main 用來選輸入、開始轉換、查看目前 MIDI，以及執行最常用動作。
+
+### Input Source
+
+| 選項 | 說明 |
+|---|---|
+| `YouTube Video` | 顯示 URL 欄與 `Convert URL`；下載並轉換單一 YouTube 影片，不處理 playlist |
+| `Audio File` | 顯示 `Open Audio...`；選取本機音訊後立即開始轉換 |
+| `MIDI File` | 顯示 `Import MIDI...`；先分析 MIDI，再由 Import 分頁決定 direct play 或 optimization |
+
+### Convert：按鈕與欄位
+
+| 控制項 | 功能 |
+|---|---|
+| `YouTube URL` | 貼上影片網址 |
+| `Convert URL` | 下載 YouTube 音訊並執行目前 conversion/processing 設定 |
+| `Open Audio...` | 選取音訊檔並開始轉換 |
+| `Import MIDI...` | 選取 `.mid`/`.midi`，讀取 metadata、Track、Channel、program 與可播放比例；不會立刻跑 optimization |
+
+### Conversion options
+
+這些設定只適用於 YouTube / Audio。
+
+| 類型 | 設定 | 值與作用 |
+|---|---|---|
+| Dropdown | `Demucs device` | `cuda:0` 使用第一張 CUDA GPU；`auto` 交由 Demucs 選擇；`cpu` 強制 CPU。預設會依環境偵測，否則為 `auto` |
+| Checkbox | `Convert vocals MIDI` | 若 separation 提供 vocals，額外把 `vocals.wav` 轉成一套 vocals MIDI；預設 Off，會增加時間與輸出 |
+| Dropdown | `Separation Mode` | 見下表 |
+| Dropdown | `Stem to Convert` | `no_vocals`、`other`、`bass`、`drums`、`vocals`；選擇送往 Basic Pitch 的音軌 |
+
+`Separation Mode`：
+
+| 值 | 行為 | 可用 stem |
+|---|---|---|
+| `No separation` | 不執行 Demucs，原始 `song.wav` 直接視為所選 stem | 任一名稱都可選，但實際內容仍是完整原音訊 |
+| `Demucs vocals only` | 產生 `vocals` 與 `no_vocals`；預設 | 僅 `vocals`、`no_vocals` |
+| `Demucs 4-stem` | 產生 `vocals`、`drums`、`bass`、`other`；需要時混合後三者建立 `no_vocals` | 全部五種 |
+| `Existing no_vocals` | 不重跑 Demucs，讀取既有 `separated/htdemucs/song/no_vocals.wav` | 只可選 `no_vocals`；檔案不存在會失敗 |
+
+### Current MIDI / MIDI Actions
+
+| 按鈕 | 功能 |
+|---|---|
+| `Open MIDI` | 直接開啟任意 MIDI 作為目前來源，不執行 Import 分析或 processing |
+| `Open Converted` | 選取既有 `output/` 工作資料夾，載入其版本與報告 |
+| `Preview` | 在 Main 的 log 列出目前 MIDI 最多前 80 個 mapped note on/off event；不播放聲音 |
+| `Play to Game` | 依 Playback 設定，把 MIDI note 轉成電腦鍵盤事件送到目前有焦點的遊戲 |
+| `Stop` | 停止正在進行的 conversion 或 game playback；播放也可按 `F8` |
+
+Main 底部 log 顯示進度、路徑、Preview event 與錯誤摘要；status 顯示目前工作狀態。`Current MIDI` 路徑是 Main、Playback、Studio、Analysis 共用的目前版本。
+
+## Import 分頁
+
+![Import 分頁截圖（待補）](docs/screenshots/import.png)
+
+Import 只在先用 `Import MIDI...` 選檔後有內容。
+
+### Original MIDI 按鈕
+
+| 按鈕 | 功能 |
+|---|---|
+| `Preview Original` | 對完整原始 MIDI 套用目前 Preview/Cleanup mapping，將最多前 80 個 event 列到 log；不播放聲音 |
+| `Play Original` | 把完整原始 MIDI event 直接送到遊戲；使用 Speed 與 Focus delay，但不套用 Track/Channel selection、Cleanup、Transpose、Chord gap 或 Min hold |
+| `Open Original` | 用 Windows 預設應用程式開啟匯入的原始 MIDI 檔 |
+
+### 檔案資訊
+
+| 欄位 | 意義 |
+|---|---|
+| `Filename` | 原始檔名 |
+| `Duration` | MIDI 計算出的總長度 |
+| `Tempo` | 第一個 tempo event 的 BPM；沒有 event 時顯示未知 |
+| `Key` | 依所有 note 推測的 major/minor key |
+| `Tracks` | 實體 MIDI track 數 |
+| `PPQ` | pulses per quarter note |
+| `Total Notes` | 完整 note-on/note-off 配對數 |
+| `Playable Notes` | 位於預設 Heartopia `C3–C6` map 內的音符數 |
+| `Out-of-range Notes` | 位於該 map 外的音符數 |
+| `Playable Percentage` | 可播放音符占比 |
+| `Recommended` | UI 依可播放比例給出的處理建議 |
+
+### Source Tracks 與 Channel 表
+
+每個真正可選聲部是 `Track + Channel`，不是只看 Track。Channel 在檔案內為 `0–15`，一般介面顯示為 MIDI `1–16`。
+
+| 欄位 | 說明 |
+|---|---|
+| `Track / Channel` | 實體 Track 與 Channel 組合 |
+| `Use Direct` | 點該欄切換臨時 `selected_direct.mid` 的內容；此版本會在 Playback 顯示為 `Imported MIDI`，可設為 Current 或用 A/B 播放。Import 上方的 `Preview/Play Original` 仍使用完整原檔 |
+| `Use Optimization` | 點該欄切換是否寫入 `selected_parts.mid` 並進入 processing pipeline |
+| `Program / Instrument` | General MIDI program number 與樂器名稱；無明示 program 時可能顯示 default |
+| `Notes` | 該聲部音符數 |
+| `Playable` / `Out of range` | Heartopia map 內／外數量 |
+| `Min` / `Max` | 最低／最高 MIDI note |
+| `Track Events` | 該 track 是否包含 tempo、meta、control 或 program 等事件摘要 |
+
+右側 `Global Notes by Channel` 是跨 Track 的 Channel 統計，只供參考，不能在這裡選取。
+
+### Selected-part out-of-range handling
+
+這組 radio button 同時影響 Direct selection 的臨時檔，以及 `Process Imported MIDI` 建立的 `selected_parts.mid`。
+
+| 選項 | 行為 |
+|---|---|
+| `Keep original (direct play)` | 保留原音高；超出 game map 的音符可能無法送出。預設 |
+| `Octave shift into playable range` | 以八度移動到可播放範圍 |
+| `Drop out-of-range notes` | 移除越界音符 |
+
+### Optimize for Heartopia
+
+| 類型 | 控制項 | 功能 |
+|---|---|---|
+| Button | `Process Imported MIDI` | 以 `Use Optimization` 選取結果和 Optimization 分頁設定執行完整 external MIDI pipeline |
+| Checkbox | `Skip Cleanup` | 不轉換 Cleanup，直接複製 `selected_parts.mid` 成 `clean_37key.mid` |
+| Checkbox | `Skip Piano Arranger` | 不重新編曲，直接複製上一階段 |
+| Checkbox | `Skip AI Optimizer` | 不執行 optimizer，直接複製上一階段 |
+| Checkbox | `Skip Pitch Correction` | 不校音，直接複製上一階段 |
+| Checkbox | `Direct Preview after processing` | 完成後立即以 game-keyboard playback 播放 Final；先準備好切回遊戲 |
+
+所有 checkbox 預設 Off。至少要選一個 `Use Optimization` 聲部才能處理。
+
+## Optimization 分頁
+
+![Optimization 分頁截圖（待補）](docs/screenshots/optimization.png)
+
+### Preset dropdown
+
+選 Preset 會立即覆寫 Cleanup、Arranger 與 Optimizer 控制值。
+
+| Preset | Min note | Velocity | Max simultaneous | Range | Melody notes / window | Style | Optimizer |
+|---|---:|---:|---:|---|---|---|---|
+| `Safe` | 10 ms | 3 | 0 | `octave_shift` | 3 / 100 ms | `original` | `None` |
+| `Balanced` | 35 ms | 12 | 0 | `smart` | 3 / 80 ms | `piano_cover` | `Rule` |
+| `Aggressive` | 70 ms | 24 | 2 | `smart` | 2 / 50 ms | `piano_cover` | `Rule` |
+| `Piano Cover` | 35 ms | 12 | 2 | `smart` | 2 / 80 ms | `piano_cover` | `Rule` |
+
+`Max simultaneous notes = 0` 表示不設此上限，不是零音符。
+
+### MIDI Cleanup
+
+| 類型 | 設定 | 範圍 | 說明 |
+|---|---|---:|---|
+| Spinbox | `Min note ms` | 0–500，step 5 | 移除短於門檻的音符 |
+| Spinbox | `Velocity threshold` | 0–127 | 移除 velocity 低於門檻的弱音 |
+| Spinbox | `Max simultaneous notes` | 0–12 | 限制同一時間窗可留的音符；`0` 不限制 |
+| Dropdown | `Range mode` | `smart`, `drop`, `octave_shift` | `drop` 移除越界音；`octave_shift` 以八度塞入範圍；`smart` 依旋律區域與候選位置處理 |
+| Checkbox | `Melody only` | Off/On | Cleanup 階段以時間窗偏向保留高音旋律，捨棄大部分伴奏 |
+| Button | `Rebuild Clean` | — | 從可用 Raw MIDI 重建 Clean，並連帶重建下游 Arranged、Optimizer、Pitch、Final |
+
+### Piano Arranger / Arrangement Style
+
+| 類型 | 設定 | 值 | 說明 |
+|---|---|---|---|
+| Spinbox | `Melody notes` | 1–3 | 每個時間群組最多保留的重點音符數 |
+| Spinbox | `Melody window ms` | 20–250，step 10 | 相近 onset 被視為同一組的時間寬度 |
+| Dropdown | `Arrangement style` | `original` | 以 Cleanup 結果為主，不做 melody/piano-cover 重編 |
+|  |  | `melody_only` | 抽取持續的最高旋律線，結果接近單音旋律 |
+|  |  | `piano_cover` | 保留主旋律，加入受限的 bass/harmony，最多三音 |
+| Button | `Rebuild Piano Arranged` | — | 重建 Arranger 與其後所有階段，不先強制重建已有 Clean |
+
+Cleanup 的 `Melody only` 與 `Arrangement style = melody_only` 是不同階段；通常只需選其中一種。
+
+### AI Optimizer
+
+| Dropdown 值 | 實際行為 |
+|---|---|
+| `Rule` | 使用本機規則依 duration、velocity、音程連續性與每窗上限挑選音符 |
+| `OpenAI` | **Experimental**。以 8 秒 chunk 呼叫 OpenAI Responses API；任何錯誤會無提示地回退至 Rule |
+| `None` | 不呼叫 OpenAI。依目前實作，pipeline 仍會經過本機 rules 並產生 `ai_optimized_37key.mid`，不是完全 bypass；external MIDI 要真正原樣傳遞此階段請用 `Skip AI Optimizer` |
+
+`Optimize MIDI` 從目前可用的 Clean/Raw 來源執行 Arranger、Optimizer、Pitch Correction 與 Final。若同時選 `original + None`，按鈕會提示需改用 Rule/OpenAI 或簡化編曲風格。
+
+### Pitch Correction
+
+Pitch Correction 沒有獨立參數。它會偵測 major/minor scale，對短、弱、離調或突跳音符做移除／鄰近音修正，再交給 Final smoothing。
+
+`Rebuild Final` 優先重用現有 `pitch_corrected_37key.mid`，只重建 Final；缺 prerequisite 時才補建上游。
+
+### Key Transpose
+
+| 類型 | 設定 | 說明 |
+|---|---|---|
+| Dropdown | `Original Key` | `Auto Detect` 或 12 個 major key 名稱；指定來源大調 |
+| Dropdown | `Target Key` | `Original` 或 12 個 major key；選取後立即產生 `transposed_37key.mid` |
+| Status | `Detected Key` | 顯示使用／偵測到的原調 |
+| Status | `Transpose` | 顯示實際半音位移 |
+
+Key Transpose 作用於目前 MIDI 並寫新檔；若目前已選 `transposed_37key.mid`，程式會要求先選非 transposed 版本。它不同於 Playback 的即時 `Transpose`。
+
+## Playback 分頁
+
+![Playback 分頁截圖（待補）](docs/screenshots/playback.png)
+
+### Current MIDI source / version
+
+| 類型 | 控制項 | 功能 |
+|---|---|---|
+| Radio | `Vocals MIDI` | 顯示 vocals pipeline 的版本；只有開啟 vocals conversion 且成功產生時可用 |
+| Radio | `Accompaniment MIDI` | 顯示主要 selected stem pipeline；預設 |
+| Dropdown | `Converted` | 列出 `output/` 下可辨識的既有 conversion folder |
+| Button | `Refresh` | 重新掃描 conversion folder 清單 |
+| Button | `Load` | 載入 dropdown 所選資料夾 |
+| Dropdown | `MIDI source` | 選目前要 Preview、Studio、編輯或 Play 的版本；只列出實際存在的檔案 |
+
+External MIDI 常見版本是 Full Imported、Imported/Direct selection、Selected Parts、Clean、Piano Arranged、AI Optimized、Pitch Corrected、Final、Edited。Audio 常見版本另有 Raw、Piano Cover、Transposed。
+
+### A/B Compare
+
+| 控制項 | 功能 |
+|---|---|
+| `A source` / `B source` dropdown | 分別選兩個已存在版本 |
+| `Play A` / `Play B` | 以 game-keyboard playback 播放該版本 |
+| `Set A as Current` / `Set B as Current` | 把該版本設為全 UI 的 Current MIDI |
+| `Stop` | 停止 A/B game playback |
+
+Imported/Selected Parts 在 A/B playback 會走 original-event 模式，因此不套用 Cleanup、Chord gap 與 Min hold；其他 processing 版本使用一般 playback 設定。
+
+### Playback Settings
+
+| 類型 | 設定 | 範圍／預設 | 說明 |
+|---|---|---|---|
+| Checkbox | `Always on top` | On | 讓 UI 視窗保持最上層；立即生效 |
+| Spinbox | `Speed` | 0.25–3.0 / `1.0` | game playback 倍速；不改檔案 |
+| Spinbox | `Focus delay` | 1–10 秒 / `3` | 送出第一鍵前的倒數時間 |
+| Spinbox | `Transpose` | -36–36 / `0` | game playback 即時半音位移；不寫 MIDI |
+| Spinbox | `Chord gap ms` | 0–80 / `18` | 把同時音符錯開送出，降低遊戲漏和弦機率 |
+| Spinbox | `Min hold ms` | 20–250 / `75` | 每個電腦鍵至少按住多久 |
+| Dropdown | `Keyboard Profile` | 見下表 / `Heartopia` | 決定 processing 與 playback 的 note map；更換後不會自動重建既有檔案 |
+
+| Keyboard Profile | 音域 | 用途 |
+|---|---|---|
+| `Heartopia` | `C3–C6`，MIDI 48–84，37 鍵 | 遊戲預設 |
+| `Standard 37-Key` | `C2–C5`，MIDI 36–72，37 鍵 | 一般 37-key layout |
+| `Full Piano` | `A0–C8`，MIDI 21–108，88 鍵 | 分析／處理完整鋼琴範圍；不代表 Heartopia 可播放全部音符 |
+
+`F8` 是全域停止 hotkey。game playback 使用 `keyboard` 套件送出電腦鍵盤事件，與 Studio 的 MIDI output playback 是兩套不同機制。
+
+## Studio 分頁
+
+![Studio 分頁截圖（待補）](docs/screenshots/studio.png)
+
+### MIDI transport
+
+| 控制項 | 功能 |
+|---|---|
+| `Play` | 從目前 seek 位置透過預設 MIDI output 播放 Current MIDI |
+| `Pause` | 暫停並送出 All Notes Off；再次按 Play 從暫停位置續播 |
+| `Stop` | 停止、關閉 MIDI output、回到 0 秒 |
+| 時間 slider | 拖曳定位；播放或暫停中移動會先送 All Notes Off |
+| current / total time | 顯示 `mm:ss.mmm` 位置與總長 |
+
+Studio `Play` 不會把按鍵送到 Heartopia。若顯示 `No MIDI output`，需安裝 `python-rtmidi` 並啟用一個 MIDI synthesizer/output port。
+
+### Range Export
+
+| 類型 | 控制項 | 功能 |
+|---|---|---|
+| Spinbox | `Start seconds` | 範圍開始，預設 `0.0` |
+| Spinbox | `End seconds` | 範圍結束，預設 `30.0`，必須大於 Start |
+| Button | `Play Range` | 用 game-keyboard playback 播放該秒數範圍，不是 Studio MIDI output |
+| Button | `Export Range` | 匯出 `chorus_37key.mid`；重疊邊界的音符會裁切，範圍起點平移到 0 |
+
+### Editor
+
+| 按鈕 | 功能 |
+|---|---|
+| `Open Selected MIDI` | 把 Current MIDI 載入表格，分析 suspicious notes |
+| `Delete selected notes` | 刪除表格中多選的音符 |
+| `Delete same pitch` | 以所選第一個音符為準，刪除所有相同 MIDI pitch |
+| `Delete suspicious notes` | 刪除所有被規則標紅並附原因的音符 |
+| `Save as edited_37key.mid` | 在來源同資料夾寫入 edited 版本；不能以已載入的 `edited_37key.mid` 再覆寫自身 |
+
+Editor 欄位：`start_ms`、`duration_ms`、`note`、`note_name`、`velocity`、`suspicious_reason`。刪除只先改記憶體內清單，按 Save 才寫檔。
+
+### Timeline
+
+| 類型 | 控制項 | 功能 |
+|---|---|---|
+| Dropdown | `View Mode` | `Piano Roll` 顯示音高／時間方塊；`Staff View` 顯示五線譜 |
+| Button | `Zoom -` | 時間軸縮小 |
+| Button | `Zoom +` | 時間軸放大 |
+| Horizontal scrollbar | — | 左右瀏覽時間軸 |
+
+Staff View 點選音符會顯示音名、開始時間、長度與 velocity，並同步選取 Editor 對應列。
+
+### Future AI Repair
+
+這一區只有保留文字，**目前沒有 AI Repair 功能或按鈕**，不是可操作功能；見 Roadmap。
+
+## Analysis 分頁
+
+![Analysis 分頁截圖（待補）](docs/screenshots/analysis.png)
+
+Analysis 沒有按鈕、dropdown 或 checkbox。切換 Current MIDI 時，程式會載入同工作資料夾的 `report.json`；若沒有報告則顯示 `--`，不會自行重跑完整 pipeline。
+
+| 區塊 | 欄位 |
+|---|---|
+| `Song Information` | Keyboard Profile、Song Duration、Tempo、Detected Key |
+| `MIDI Statistics` | Total Notes、Raw Notes、Selected Notes、Selected Tracks、Selected Channels |
+| `Conversion Report` | Clean Notes、Piano Arranged Notes、Final Notes |
+| `Note Statistics` | Removed Notes、Merged Notes、Octave Shifted、Bass Removed、Harmony Simplified、Melody Selected |
+
+統計反映建立 report 當時的 pipeline；之後只切換版本或手動編輯，不會自動改寫舊 report。
+
+## 所有輸出檔案
+
+### 命名與資料夾
+
+- YouTube：`output/<影片標題>_<video-id>/`
+- Audio：`output/<原檔名>_local/`
+- External MIDI：`output/<原檔名>_midi/`
+- 預設 audio pipeline 的 MIDI 位於 `midi/accompaniment/`，vocals 位於 `midi/vocals/`
+- 非預設 separation/stem 組合位於 `midi/selected_<mode>_<stem>/`
+
+### MIDI 檔案
+
+| 檔案 | 何時產生 | 內容與用途 |
+|---|---|---|
+| Basic Pitch Raw MIDI（檔名由 Basic Pitch 決定） | Audio/YouTube transcription | 最接近音訊辨識結果；通常仍有越界、短音與雜音 |
+| `imported.mid` | External MIDI processing | 原檔工作副本；Type 2 會在副本中正規化為 Type 1 |
+| `selected_parts.mid` | External MIDI processing | 只含 `Use Optimization` 聲部，並套用 selected-part 越界模式 |
+| `selected_direct.mid` | Direct Preview/Play 時 | 暫存資料夾中的 Direct selection 工作檔；關閉程式後不保證保留 |
+| `clean_37key.mid` | Cleanup | 移除短／弱音、處理音域、旋律模式與同時音上限；Skip 時是 pass-through copy |
+| `piano_arranged_37key.mid` | Arranger | `piano_cover`／`melody_only` 結果；targeted rebuild 的 `original` 可建立 pass-through；某些 original audio run 可能不產生此檔 |
+| `piano_cover_37key.mid` | Audio/YouTube post-processing 使用簡化 arrangement 時 | `piano_arranged_37key.mid` 的 legacy 相容副本 |
+| `ai_optimized_37key.mid` | Optimizer | Rule 或 Experimental OpenAI 的輸出；Skip 時為 pass-through |
+| `pitch_corrected_37key.mid` | Pitch Correction | 偵測 key 後移除／修正可疑離調與跳音；Skip 時為 pass-through |
+| `final_37key.mid` | Final smoothing | 將時間量化、保證最短音長、避開同 pitch 重疊；通常是 Play to Game 首選 |
+| `transposed_37key.mid` | 改變 Optimization 的 Target Key | 實際寫入新調的版本 |
+| `chorus_37key.mid` | Studio `Export Range` | 所選秒數範圍，平移至 0 秒 |
+| `edited_37key.mid` | Editor Save | 手動刪除後的版本；版本選擇時優先度最高 |
+
+### 其他產物
+
+| 檔案／資料夾 | 說明 |
+|---|---|
+| `download/song.wav` | YouTube 下載或本機音訊正規化後的工作音訊 |
+| `separated/htdemucs/song/*.wav` | Demucs stems：vocals、no_vocals，或 drums/bass/other |
+| `report.json` | Analysis 面板使用的 pipeline 統計 |
+| `piano_arranged_37key_report.json` | Piano Arranger 詳細統計；Skip Arranger 時會移除舊報告 |
+
+## 建議設定
+
+### 初學者
+
+| 情境 | 建議 |
+|---|---|
+| 高品質現成 MIDI | `Safe`，先 A/B 比較 Raw/Imported 與 Final；若原檔已完全符合範圍，可 Skip Piano Arranger |
+| 一般現成 MIDI | `Balanced`、`Use Optimization` 只選主旋律／鋼琴聲部、selected-part range 用 `octave_shift` |
+| YouTube / Audio | `Demucs vocals only` + `no_vocals` + `Balanced`；先不要勾 vocals |
+| 遊戲播放 | `Speed 1.0`、`Focus delay 3`、`Transpose 0`、`Chord gap 18 ms`、`Min hold 75 ms`、`Heartopia` |
+| 和弦漏音 | 先把 Speed 降到 `0.75`，再把 Chord gap 小幅提高到 `24–30 ms` |
+
+第一次不要同時大改多個門檻。先比較 `Clean → Piano Arranged → Final`，找出問題在哪一階段。
+
+### 進階使用者
+
+| 目標 | 建議做法 |
+|---|---|
+| 最大限度保留原譜 | 由 `Safe` 起步，`original`、低 Min note/Velocity、`Max simultaneous = 0`，用 A/B 驗證 |
+| 去除 transcription 雜音 | 由 `Aggressive` 起步；逐步調整 Min note、Velocity、window，避免一次過度刪音 |
+| 只保留主旋律 | 優先試 `Arrangement style = melody_only`；若仍太密，再開 Cleanup `Melody only` |
+| 簡化鋼琴 cover | `Piano Cover` preset，Melody notes `2–3`，window `50–100 ms` |
+| 精準挑聲部 | 在 Import 分開設定 `Use Direct` 與 `Use Optimization`，以 Track+Channel 而非整 Track 判斷 |
+| 測 OpenAI | **Experimental**；先保存 Rule 版本、確認 API 費用與資料傳送，再用 A/B 比較；失敗會回退 Rule |
+| 建立片段 | Studio 定好 Start/End，Export Range，再把 `chorus_37key.mid` 設為 Current |
+| 保留演奏事件 | Direct Play `Full Imported MIDI`；避免把需要 sustain、program 或多 channel identity 的需求交給 note-only processing stages |
+
+## FAQ
+
+### 為什麼按 Play to Game 沒有聲音？
+
+它不是音訊播放器，而是向目前焦點視窗送電腦鍵盤事件。倒數時切回 Heartopia、打開鋼琴並確保遊戲視窗有焦點。若要在電腦上聽 MIDI，使用 Studio Play 並先準備 MIDI synthesizer。
+
+### Studio Play 為什麼顯示 No MIDI output？
+
+`python-rtmidi` 只提供連線能力，仍需 Windows 上有可開啟的 hardware/software MIDI output。啟動 synthesizer 後重開程式再試。
+
+### 如何立即停止？
+
+game playback 按 `F8`，或按 Main / A/B 的 `Stop`。Studio playback 使用 Studio 的 `Stop`。
+
+### 為什麼 Heartopia 顯示 C3–C6，不是 C2–C5？
+
+目前 `Heartopia` profile 的實作是 MIDI `48–84`，依標準 MIDI 命名為 `C3–C6`。`Standard 37-Key` 才是 `C2–C5`。
+
+### 為什麼 MIDI editor 顯示的軌數和 Import 不同？
+
+Track 是檔案容器，Channel 才常代表樂器聲部。同一 Track 可有多個 Channel，不同軟體也可能按 Channel 顯示「軌」。本程式以實體 `Track + Channel` 分析可選聲部。
+
+### `Keep original` 為什麼仍有音符沒播放？
+
+超出所選 Keyboard Profile map 的音符沒有對應遊戲按鍵。改用 `Octave shift into playable range` 或 `Drop out-of-range notes`。
+
+### `None` 為什麼仍有 `ai_optimized_37key.mid`？
+
+pipeline 固定建立各階段檔案，而且目前 `None` 仍走本機 rules。External MIDI 若要讓此階段完全傳遞上一版本，勾 `Skip AI Optimizer`。
+
+### OpenAI 失敗時會怎樣？
+
+**Experimental OpenAI Optimizer** 會自動回退到 Rule，因此 conversion 仍可能成功，但 UI 不會為每個 chunk 顯示回退原因。
+
+### 為什麼 `Existing no_vocals` 失敗？
+
+它只讀取既有 `separated/htdemucs/song/no_vocals.wav`，不會自行建立，而且 `Stem to Convert` 必須是 `no_vocals`。
+
+### 為什麼選 `other` 或 `drums` 後失敗？
+
+`Demucs vocals only` 只提供 vocals/no_vocals。請改成 `Demucs 4-stem`。
+
+### 為什麼 Analysis 全是 `--`？
+
+目前 MIDI 的資料夾沒有 `report.json`，或只是用 `Open MIDI` 載入單檔。Analysis 不會為任意單檔自動執行 pipeline。
+
+### Skip 之後為什麼還有對應檔案？
+
+Skip 代表略過該演算法，不是略過檔名。程式建立 pass-through copy，讓下游和版本選單有一致的 stage artifact。
+
+### 可以停止 conversion 嗎？
+
+可以按 Main 的 `Stop`。外部 process 會收到取消要求；已經完整寫出的舊檔或 cache 可能仍留在 `output/`。
+
+### 為什麼轉同一來源像是直接載入舊結果？
+
+預設 separation/stem 組合會重用可辨識的 cached conversion。若要以新 processing 參數更新，可用 Optimization 的 rebuild 按鈕；非預設 separation/stem 會使用不同 MIDI 子資料夾。
 
 ## Roadmap
 
-以下為規劃項目，不代表目前已完整實作：
+以下皆為規劃方向，**目前不存在或尚未完成，不應視為可用功能**：
 
-- Track/Channel part selection 強化：加入更直覺的聲部預聽、命名與選取流程。
-- Better Piano Arranger：改善旋律、和聲與低音判斷。
-- Better Piano Roll / Staff View：改善視覺排版、記譜資訊與編輯互動。
-- AI Repair：在 Studio／Editor 中提供可控的 AI 修復建議。
-- Multiple transcription engines：加入多種音訊轉錄引擎供比較與選擇。
-- Dataset builder for future ML：建立未來機器學習所需的資料集整理工具。
+- AI Repair：Studio 已保留說明區，但沒有修復按鈕或模型流程。
+- 更直覺的 Track/Channel 聲部命名、獨立 audition 與選取流程。
+- 改善 Piano Arranger 的旋律、和聲與低音判斷。
+- 改善 Piano Roll / Staff View 排版、記譜資訊與編輯互動。
+- 支援多種 transcription engine 並可比較結果。
+- 建立供未來 machine learning 使用的 dataset builder。
 
 ## License
 
-目前專案未包含授權檔（license file）。
+目前 repository 未包含 license file。

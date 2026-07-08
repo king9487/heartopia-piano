@@ -46,6 +46,16 @@ GENERATED_MIDI_NAMES = {
     PIANO_ARRANGED_MIDI_NAME,
 }
 
+SEPARATION_MODES = (
+    "No separation",
+    "Demucs vocals only",
+    "Demucs 4-stem",
+    "Existing no_vocals",
+)
+SEPARATION_STEMS = ("no_vocals", "other", "bass", "drums", "vocals")
+DEFAULT_SEPARATION_MODE = "Demucs vocals only"
+DEFAULT_SEPARATION_STEM = "no_vocals"
+
 
 def sanitize_filename(value, max_length=120):
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value)
@@ -215,6 +225,9 @@ def import_external_midi(
 
     options = dict(options or {})
     skips = dict(skips or {})
+    report_progress(
+        f"Keyboard profile: {options.get('keyboard_profile', 'Heartopia')}"
+    )
     clean_midi = base_dir / CLEAN_37KEY_MIDI_NAME
     arranged_midi = base_dir / PIANO_ARRANGED_MIDI_NAME
     ai_midi = base_dir / AI_OPTIMIZED_MIDI_NAME
@@ -293,6 +306,7 @@ def import_external_midi(
         final_midi,
         detected_key,
         arrangement_statistics=arrangement_statistics,
+        keyboard_profile=options.get("keyboard_profile", "Heartopia"),
     )
     report_path = export_midi_analysis_report(
         analysis_report, base_dir / MIDI_ANALYSIS_REPORT_NAME
@@ -352,7 +366,11 @@ def piano_arranged_midi_path(raw_midi):
 
 def ensure_clean_37key_midi(raw_midi, options=None):
     output_midi = clean_37key_midi_path(raw_midi)
-    if output_midi.exists() and output_midi.stat().st_mtime >= Path(raw_midi).stat().st_mtime:
+    if (
+        options is None
+        and output_midi.exists()
+        and output_midi.stat().st_mtime >= Path(raw_midi).stat().st_mtime
+    ):
         print("Using existing Clean 37-Key MIDI:", output_midi)
         return output_midi
 
@@ -437,7 +455,9 @@ def rebuild_midi_stages(raw_midi, start_stage, options=None):
         "ai_optimized_midi": ai_midi if ai_midi.exists() else None,
         "pitch_corrected_midi": pitch_midi,
         "final_midi": final_midi,
-        "detected_key": detect_key_for_midi(pitch_midi),
+        "detected_key": detect_key_for_midi(
+            pitch_midi, note_map=options.get("note_map")
+        ),
         "regenerated_stages": regenerated,
     }
 
@@ -499,6 +519,7 @@ def ensure_full_post_processing(raw_midi, options=None):
         final_midi,
         detected_key,
         arrangement_statistics=arrangement_statistics,
+        keyboard_profile=(options or {}).get("keyboard_profile", "Heartopia"),
     )
     report_path = export_midi_analysis_report(
         analysis_report, clean_midi.with_name(MIDI_ANALYSIS_REPORT_NAME)
@@ -523,6 +544,9 @@ def results_from_output_dir(base_dir):
     wav_file = base_dir / "download" / "song.wav"
     vocals = base_dir / "separated" / "htdemucs" / "song" / "vocals.wav"
     no_vocals = base_dir / "separated" / "htdemucs" / "song" / "no_vocals.wav"
+    drums = base_dir / "separated" / "htdemucs" / "song" / "drums.wav"
+    bass = base_dir / "separated" / "htdemucs" / "song" / "bass.wav"
+    other = base_dir / "separated" / "htdemucs" / "song" / "other.wav"
     vocal_midi = latest_midi_file(base_dir / "midi" / "vocals")
     accompaniment_midi = latest_midi_file(base_dir / "midi" / "accompaniment")
 
@@ -553,6 +577,12 @@ def results_from_output_dir(base_dir):
         "wav_file": wav_file,
         "vocals": vocals,
         "no_vocals": no_vocals,
+        "drums": drums if drums.exists() else None,
+        "bass": bass if bass.exists() else None,
+        "other": other if other.exists() else None,
+        "selected_audio": no_vocals,
+        "separation_mode": DEFAULT_SEPARATION_MODE,
+        "stem_to_convert": DEFAULT_SEPARATION_STEM,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
         "vocal_report_path": (
@@ -620,12 +650,12 @@ def list_converted_outputs(output_root="output"):
     return sorted(converted, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def ensure_clean_results(results, include_vocals=False):
+def ensure_clean_results(results, include_vocals=False, options=None):
     if not results:
         return results
 
     if include_vocals and results.get("vocal_midi"):
-        vocal_outputs = ensure_full_post_processing(results["vocal_midi"])
+        vocal_outputs = ensure_full_post_processing(results["vocal_midi"], options=options)
         results["vocal_piano_arranged_midi"] = vocal_outputs["piano_arranged_midi"]
         results["vocal_analysis_report"] = vocal_outputs["analysis_report"]
         results["vocal_report_path"] = vocal_outputs["report_path"]
@@ -636,7 +666,9 @@ def ensure_clean_results(results, include_vocals=False):
         results["vocal_final_midi"] = vocal_outputs["final_midi"]
         results["vocal_detected_key"] = vocal_outputs["detected_key"]
     if results.get("accompaniment_midi"):
-        accompaniment_outputs = ensure_full_post_processing(results["accompaniment_midi"])
+        accompaniment_outputs = ensure_full_post_processing(
+            results["accompaniment_midi"], options=options
+        )
         results["accompaniment_piano_arranged_midi"] = accompaniment_outputs[
             "piano_arranged_midi"
         ]
@@ -738,6 +770,7 @@ def prepare_local_audio(audio_file, output_dir, cancel_token=None):
 
 
 def separate_vocals(wav_file, output_dir, cancel_token=None, device=None):
+    """Run the original two-stem Demucs workflow (kept for API compatibility)."""
     output_dir = Path(output_dir)
     song_name = wav_file.stem
     separated_dir = output_dir / "htdemucs" / song_name
@@ -767,6 +800,92 @@ def separate_vocals(wav_file, output_dir, cancel_token=None, device=None):
         raise FileNotFoundError("no_vocals.wav not found")
 
     return vocals, no_vocals
+
+
+def prepare_separated_audio(
+    wav_file,
+    output_dir,
+    separation_mode=DEFAULT_SEPARATION_MODE,
+    stem_to_convert=DEFAULT_SEPARATION_STEM,
+    cancel_token=None,
+    device=None,
+):
+    """Return the selected audio input and all available separated stems."""
+    if separation_mode not in SEPARATION_MODES:
+        raise ValueError(f"Unknown separation mode: {separation_mode}")
+    if stem_to_convert not in SEPARATION_STEMS:
+        raise ValueError(f"Unknown stem to convert: {stem_to_convert}")
+
+    wav_file = Path(wav_file)
+    output_dir = Path(output_dir)
+    stem_dir = output_dir / "htdemucs" / wav_file.stem
+    stems = {name: stem_dir / f"{name}.wav" for name in SEPARATION_STEMS}
+
+    if separation_mode == "No separation":
+        return wav_file, {stem_to_convert: wav_file}
+
+    if separation_mode == "Existing no_vocals":
+        existing = stems["no_vocals"]
+        if not existing.exists():
+            raise FileNotFoundError(
+                f"Existing no_vocals.wav not found: {existing}"
+            )
+        if stem_to_convert != "no_vocals":
+            raise ValueError(
+                "Existing no_vocals mode can only convert the no_vocals stem"
+            )
+        return existing, {"no_vocals": existing}
+
+    if separation_mode == "Demucs vocals only":
+        vocals, no_vocals = separate_vocals(
+            wav_file,
+            output_dir,
+            cancel_token=cancel_token,
+            device=device,
+        )
+        available = {"vocals": vocals, "no_vocals": no_vocals}
+        if stem_to_convert not in available:
+            raise ValueError(
+                f"{stem_to_convert} requires Demucs 4-stem separation"
+            )
+        return available[stem_to_convert], available
+
+    four_stems = ("vocals", "drums", "bass", "other")
+    if not all(stems[name].exists() for name in four_stems):
+        cmd = [find_executable("demucs"), "-o", str(output_dir)]
+        if device:
+            cmd.extend(["--device", device])
+        cmd.append(str(wav_file))
+        run(cmd, cancel_token=cancel_token)
+
+    missing = [name for name in four_stems if not stems[name].exists()]
+    if missing:
+        raise FileNotFoundError(
+            "Demucs 4-stem output missing: " + ", ".join(f"{name}.wav" for name in missing)
+        )
+
+    available = {name: stems[name] for name in four_stems}
+    if stem_to_convert == "no_vocals":
+        no_vocals = stems["no_vocals"]
+        if not no_vocals.exists():
+            run(
+                [
+                    find_executable("ffmpeg"),
+                    "-y",
+                    "-i", str(stems["drums"]),
+                    "-i", str(stems["bass"]),
+                    "-i", str(stems["other"]),
+                    "-filter_complex",
+                    "[0:a][1:a][2:a]amix=inputs=3:normalize=0[a]",
+                    "-map", "[a]",
+                    str(no_vocals),
+                ],
+                cancel_token=cancel_token,
+            )
+        if not no_vocals.exists():
+            raise FileNotFoundError("Failed to create no_vocals.wav from 4-stem output")
+        available["no_vocals"] = no_vocals
+    return available[stem_to_convert], available
 
 
 def _report_basic_pitch_message(message, progress_callback=None):
@@ -876,7 +995,18 @@ def youtube_to_midi(
     demucs_device=None,
     convert_vocals_midi=False,
     progress_callback=None,
+    options=None,
+    separation_mode=DEFAULT_SEPARATION_MODE,
+    stem_to_convert=DEFAULT_SEPARATION_STEM,
 ):
+    report_progress = progress_callback or (lambda message: None)
+    report_progress(
+        f"Keyboard profile: {(options or {}).get('keyboard_profile', 'Heartopia')}"
+    )
+    report_progress(f"Separation mode: {separation_mode}")
+    report_progress(f"Stem to convert: {stem_to_convert}")
+    print("Separation mode:", separation_mode)
+    print("Stem to convert:", stem_to_convert)
     base_dir = Path(base_dir) if base_dir else output_dir_for_url(url, cancel_token=cancel_token)
     download_dir = base_dir / "download"
     separated_dir = base_dir / "separated"
@@ -884,7 +1014,11 @@ def youtube_to_midi(
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    cached_results = results_from_output_dir(base_dir)
+    is_legacy_default = (
+        separation_mode == DEFAULT_SEPARATION_MODE
+        and stem_to_convert == DEFAULT_SEPARATION_STEM
+    )
+    cached_results = results_from_output_dir(base_dir) if is_legacy_default else None
     if cached_results:
         print("Using cached conversion:", base_dir)
         if convert_vocals_midi and not cached_results.get("vocal_midi"):
@@ -895,19 +1029,30 @@ def youtube_to_midi(
                 cancel_token=cancel_token,
                 progress_callback=progress_callback,
             )
-        return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
+        return ensure_clean_results(
+            cached_results,
+            include_vocals=convert_vocals_midi,
+            options=options,
+        )
 
     print("Step 1: Downloading YouTube audio...")
     wav_file = download_youtube_audio(url, download_dir, cancel_token=cancel_token)
 
-    print("Step 2: Separating vocals and accompaniment...")
-    vocals, no_vocals = separate_vocals(
-        wav_file, separated_dir, cancel_token=cancel_token, device=demucs_device
+    print("Step 2: Preparing selected source separation mode...")
+    selected_audio, stems = prepare_separated_audio(
+        wav_file,
+        separated_dir,
+        separation_mode=separation_mode,
+        stem_to_convert=stem_to_convert,
+        cancel_token=cancel_token,
+        device=demucs_device,
     )
+    vocals = stems.get("vocals")
+    no_vocals = stems.get("no_vocals")
 
     vocal_midi = None
     vocal_clean_midi = None
-    if convert_vocals_midi:
+    if convert_vocals_midi and vocals:
         print("Step 3: Converting vocals to MIDI...")
         vocal_midi = convert_audio_to_midi(
             vocals,
@@ -918,17 +1063,22 @@ def youtube_to_midi(
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
 
-    print("Step 4: Converting accompaniment to MIDI...")
+    print(f"Step 4: Converting {stem_to_convert} to MIDI...")
+    selected_midi_dir = (
+        midi_dir / "accompaniment"
+        if is_legacy_default
+        else midi_dir / f"selected_{sanitize_filename(separation_mode)}_{stem_to_convert}"
+    )
     accompaniment_midi = convert_audio_to_midi(
-        no_vocals,
-        midi_dir / "accompaniment",
+        selected_audio,
+        selected_midi_dir,
         cancel_token=cancel_token,
         progress_callback=progress_callback,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
     if vocal_midi:
-        vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_outputs = ensure_full_post_processing(vocal_midi, options=options)
         vocal_piano_arranged_midi = vocal_outputs["piano_arranged_midi"]
         vocal_analysis_report = vocal_outputs["analysis_report"]
         vocal_report_path = vocal_outputs["report_path"]
@@ -947,7 +1097,7 @@ def youtube_to_midi(
         vocal_pitch_corrected_midi = None
         vocal_final_midi = None
         vocal_detected_key = None
-    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi, options=options)
     accompaniment_piano_arranged_midi = accompaniment_outputs["piano_arranged_midi"]
     accompaniment_analysis_report = accompaniment_outputs["analysis_report"]
     accompaniment_report_path = accompaniment_outputs["report_path"]
@@ -963,6 +1113,12 @@ def youtube_to_midi(
         "wav_file": wav_file,
         "vocals": vocals,
         "no_vocals": no_vocals,
+        "drums": stems.get("drums"),
+        "bass": stems.get("bass"),
+        "other": stems.get("other"),
+        "selected_audio": selected_audio,
+        "separation_mode": separation_mode,
+        "stem_to_convert": stem_to_convert,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
         "vocal_analysis_report": vocal_analysis_report,
@@ -994,7 +1150,18 @@ def audio_file_to_midi(
     demucs_device=None,
     convert_vocals_midi=False,
     progress_callback=None,
+    options=None,
+    separation_mode=DEFAULT_SEPARATION_MODE,
+    stem_to_convert=DEFAULT_SEPARATION_STEM,
 ):
+    report_progress = progress_callback or (lambda message: None)
+    report_progress(
+        f"Keyboard profile: {(options or {}).get('keyboard_profile', 'Heartopia')}"
+    )
+    report_progress(f"Separation mode: {separation_mode}")
+    report_progress(f"Stem to convert: {stem_to_convert}")
+    print("Separation mode:", separation_mode)
+    print("Stem to convert:", stem_to_convert)
     base_dir = Path(base_dir) if base_dir else output_dir_for_audio_file(audio_file)
     download_dir = base_dir / "download"
     separated_dir = base_dir / "separated"
@@ -1002,7 +1169,11 @@ def audio_file_to_midi(
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    cached_results = results_from_output_dir(base_dir)
+    is_legacy_default = (
+        separation_mode == DEFAULT_SEPARATION_MODE
+        and stem_to_convert == DEFAULT_SEPARATION_STEM
+    )
+    cached_results = results_from_output_dir(base_dir) if is_legacy_default else None
     if cached_results:
         print("Using cached conversion:", base_dir)
         if convert_vocals_midi and not cached_results.get("vocal_midi"):
@@ -1013,19 +1184,30 @@ def audio_file_to_midi(
                 cancel_token=cancel_token,
                 progress_callback=progress_callback,
             )
-        return ensure_clean_results(cached_results, include_vocals=convert_vocals_midi)
+        return ensure_clean_results(
+            cached_results,
+            include_vocals=convert_vocals_midi,
+            options=options,
+        )
 
     print("Step 1: Preparing local audio...")
     wav_file = prepare_local_audio(audio_file, download_dir, cancel_token=cancel_token)
 
-    print("Step 2: Separating vocals and accompaniment...")
-    vocals, no_vocals = separate_vocals(
-        wav_file, separated_dir, cancel_token=cancel_token, device=demucs_device
+    print("Step 2: Preparing selected source separation mode...")
+    selected_audio, stems = prepare_separated_audio(
+        wav_file,
+        separated_dir,
+        separation_mode=separation_mode,
+        stem_to_convert=stem_to_convert,
+        cancel_token=cancel_token,
+        device=demucs_device,
     )
+    vocals = stems.get("vocals")
+    no_vocals = stems.get("no_vocals")
 
     vocal_midi = None
     vocal_clean_midi = None
-    if convert_vocals_midi:
+    if convert_vocals_midi and vocals:
         print("Step 3: Converting vocals to MIDI...")
         vocal_midi = convert_audio_to_midi(
             vocals,
@@ -1036,17 +1218,22 @@ def audio_file_to_midi(
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
 
-    print("Step 4: Converting accompaniment to MIDI...")
+    print(f"Step 4: Converting {stem_to_convert} to MIDI...")
+    selected_midi_dir = (
+        midi_dir / "accompaniment"
+        if is_legacy_default
+        else midi_dir / f"selected_{sanitize_filename(separation_mode)}_{stem_to_convert}"
+    )
     accompaniment_midi = convert_audio_to_midi(
-        no_vocals,
-        midi_dir / "accompaniment",
+        selected_audio,
+        selected_midi_dir,
         cancel_token=cancel_token,
         progress_callback=progress_callback,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
     if vocal_midi:
-        vocal_outputs = ensure_full_post_processing(vocal_midi)
+        vocal_outputs = ensure_full_post_processing(vocal_midi, options=options)
         vocal_piano_arranged_midi = vocal_outputs["piano_arranged_midi"]
         vocal_analysis_report = vocal_outputs["analysis_report"]
         vocal_report_path = vocal_outputs["report_path"]
@@ -1065,7 +1252,7 @@ def audio_file_to_midi(
         vocal_pitch_corrected_midi = None
         vocal_final_midi = None
         vocal_detected_key = None
-    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi)
+    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi, options=options)
     accompaniment_piano_arranged_midi = accompaniment_outputs["piano_arranged_midi"]
     accompaniment_analysis_report = accompaniment_outputs["analysis_report"]
     accompaniment_report_path = accompaniment_outputs["report_path"]
@@ -1081,6 +1268,12 @@ def audio_file_to_midi(
         "wav_file": wav_file,
         "vocals": vocals,
         "no_vocals": no_vocals,
+        "drums": stems.get("drums"),
+        "bass": stems.get("bass"),
+        "other": stems.get("other"),
+        "selected_audio": selected_audio,
+        "separation_mode": separation_mode,
+        "stem_to_convert": stem_to_convert,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
         "vocal_analysis_report": vocal_analysis_report,

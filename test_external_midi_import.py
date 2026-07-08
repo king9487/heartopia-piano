@@ -271,6 +271,51 @@ class ExternalMidiImportTests(unittest.TestCase):
             self.assertEqual(metadata["musical_parts"][0]["channel"], 1)
             self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), source_hash)
 
+    def test_selected_parts_preserves_global_and_selected_channel_events(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "events.mid"
+            selected = root / "selected.mid"
+            midi = mido.MidiFile(type=1, ticks_per_beat=480)
+            meta = mido.MidiTrack()
+            meta.extend((
+                mido.MetaMessage("set_tempo", tempo=600000, time=0),
+                mido.MetaMessage(
+                    "time_signature", numerator=3, denominator=4, time=0
+                ),
+            ))
+            notes = mido.MidiTrack()
+            notes.extend((
+                mido.Message("program_change", channel=0, program=5, time=0),
+                mido.Message("control_change", channel=0, control=64, value=127, time=0),
+                mido.Message("note_on", channel=0, note=60, velocity=80, time=0),
+                mido.Message("note_off", channel=0, note=60, velocity=0, time=120),
+                mido.Message("program_change", channel=1, program=9, time=0),
+                mido.Message("control_change", channel=1, control=1, value=64, time=0),
+                mido.Message("note_on", channel=1, note=64, velocity=80, time=0),
+                mido.Message("note_off", channel=1, note=64, velocity=0, time=120),
+            ))
+            midi.tracks.extend((meta, notes))
+            midi.save(source)
+
+            write_selected_parts_midi(source, selected, {(1, 1)}, "keep")
+
+            messages = [message for track in mido.MidiFile(selected).tracks for message in track]
+            self.assertTrue(any(message.type == "set_tempo" for message in messages))
+            self.assertTrue(any(message.type == "time_signature" for message in messages))
+            self.assertTrue(any(
+                message.type == "program_change" and message.channel == 1
+                for message in messages
+            ))
+            self.assertTrue(any(
+                message.type == "control_change" and message.channel == 1
+                for message in messages
+            ))
+            self.assertFalse(any(
+                not message.is_meta and getattr(message, "channel", None) == 0
+                for message in messages
+            ))
+
     def test_selected_parts_range_modes_shift_or_drop_out_of_range_notes(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

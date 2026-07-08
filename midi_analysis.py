@@ -50,11 +50,15 @@ GM_PROGRAM_NAMES = (
 
 MIDI_ANALYSIS_REPORT_NAME = "report.json"
 ANALYSIS_FIELDS = (
+    "Keyboard Profile",
     "Song Duration",
     "Tempo",
     "Detected Key",
     "Total Notes",
     "Raw Notes",
+    "Selected Notes",
+    "Selected Tracks",
+    "Selected Channels",
     "Clean Notes",
     "Piano Arranged Notes",
     "Final Notes",
@@ -362,16 +366,26 @@ def build_midi_analysis_report(
     final_midi,
     detected_key,
     arrangement_statistics=None,
+    keyboard_profile="Heartopia",
 ):
     arrangement_statistics = arrangement_statistics or {}
     duration, tempo = midi_duration_and_tempo(raw_midi)
     raw_notes = midi_note_count(raw_midi)
+    selected_parts = inspect_midi_file(raw_midi).get("musical_parts", ())
     return {
+        "Keyboard Profile": keyboard_profile,
         "Song Duration": round(duration, 3),
         "Tempo": round(tempo, 2),
         "Detected Key": detected_key or "Unknown",
         "Total Notes": raw_notes,
         "Raw Notes": raw_notes,
+        "Selected Notes": raw_notes,
+        "Selected Tracks": len({
+            part["track_index"] for part in selected_parts if part["notes"]
+        }),
+        "Selected Channels": len({
+            part["channel"] for part in selected_parts if part["notes"]
+        }),
         "Clean Notes": midi_note_count(clean_midi),
         "Piano Arranged Notes": midi_note_count(piano_arranged_midi),
         "Final Notes": midi_note_count(final_midi),

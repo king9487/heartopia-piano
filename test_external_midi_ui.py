@@ -113,6 +113,12 @@ class ExternalMidiUiTests(unittest.TestCase):
                 app.browse_external_midi()
 
             self.assertEqual(app.results["source_midi"], source)
+            selected_direct = app.results["selected_direct_midi"]
+            self.assertTrue(selected_direct.is_file())
+            self.assertNotEqual(selected_direct, source)
+            self.assertEqual(app.results["selected_direct_midi_stats"], {
+                "tracks": 1, "channels": 1, "notes": 3,
+            })
             self.assertEqual(app.sources_refreshed, 1)
             self.assertEqual(app.process_external_midi_button.state, "normal")
             self.assertEqual(app.preview_original_midi_button.state, "normal")
@@ -136,6 +142,10 @@ class ExternalMidiUiTests(unittest.TestCase):
             )
             self.assertIn("Original MIDI track count: 1", app.logs)
             self.assertIn("Track 0 note count: 3", app.logs)
+            self.assertIn("Selected Direct MIDI created", app.logs)
+            self.assertIn("Tracks kept: 1", app.logs)
+            self.assertIn("Channels kept: 1", app.logs)
+            self.assertIn("Notes kept: 3", app.logs)
             self.assertFalse((root / "output").exists())
 
             tree = app.external_midi_track_tree
@@ -145,6 +155,7 @@ class ExternalMidiUiTests(unittest.TestCase):
             app.external_part_tree_items["1"] = (0, 0)
             app.on_external_part_tree_click(SimpleNamespace(x=1, y=1))
             self.assertFalse(app.external_part_selections[(0, 0)]["direct"])
+            app.selected_direct_temp_dir.cleanup()
             self.assertEqual(tree.rows[1][2][0], "☐")
 
     def test_original_actions_reuse_preview_and_playback_with_source_path(self):
@@ -163,11 +174,7 @@ class ExternalMidiUiTests(unittest.TestCase):
                 app.open_original_midi()
 
             self.assertEqual(app.previewed, [source])
-            self.assertEqual(app.played, [(source, {
-                "original_events": True,
-                "original_part_filter": {(0, 0)},
-                "original_range_mode": "keep",
-            })])
+            self.assertEqual(app.played, [(source, {"original_events": True})])
             startfile.assert_called_once_with(source)
 
     def test_recommendation_uses_playable_percentage_thresholds(self):

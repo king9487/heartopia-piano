@@ -5,8 +5,17 @@ def build_analysis_panel(app, parent, row):
     parent.columnconfigure(1, weight=1)
 
     groups = (
-        ("Song Information", ("Song Duration", "Tempo", "Detected Key")),
-        ("MIDI Statistics", ("Total Notes", "Raw Notes")),
+        (
+            "Song Information",
+            ("Keyboard Profile", "Song Duration", "Tempo", "Detected Key"),
+        ),
+        (
+            "MIDI Statistics",
+            (
+                "Total Notes", "Raw Notes", "Selected Notes",
+                "Selected Tracks", "Selected Channels",
+            ),
+        ),
         (
             "Conversion Report",
             ("Clean Notes", "Piano Arranged Notes", "Final Notes"),

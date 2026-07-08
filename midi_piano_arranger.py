@@ -65,9 +65,6 @@ def _lift_melody_pitch(note, previous_pitch, group, lowest, highest, enabled):
     singing_floor = min(highest, lowest + 24)
     if not enabled or pitch >= singing_floor or lifted > highest:
         return pitch, False
-    if lifted not in DEFAULT_NOTE_MAP:
-        return pitch, False
-
     collision = any(other is not note and other.note == lifted for other in group)
     if collision:
         return pitch, False
@@ -85,7 +82,7 @@ def _fit_accompaniment_below(pitch, melody_pitch, lowest, highest):
         candidate -= 12
     if candidate < lowest or candidate > highest or candidate >= melody_pitch:
         return None
-    return candidate if candidate in DEFAULT_NOTE_MAP else None
+    return candidate
 
 
 def _harmony_score(note, pitch, melody_pitch):
@@ -127,7 +124,7 @@ def _merge_and_reduce_repeats(events, options):
 
 def arrange_piano_notes(notes, note_map=None, options=None):
     options = {**DEFAULT_PIANO_ARRANGER_OPTIONS, **(options or {})}
-    note_map = note_map or DEFAULT_NOTE_MAP
+    note_map = note_map or options.get("note_map") or DEFAULT_NOTE_MAP
     lowest, highest = min(note_map), max(note_map)
     max_notes = max(2, min(int(options["max_notes_per_window"]), 3))
     bass_repeat = max(0, int(options["bass_repeat_ms"])) / 1000
@@ -316,7 +313,9 @@ def arrange_piano_midi(input_midi, output_midi=None, options=None, report_path=N
         else output_midi.with_name(PIANO_ARRANGEMENT_REPORT_NAME)
     )
     notes, statistics = arrange_piano_notes(
-        read_midi_notes(input_midi), options=options
+        read_midi_notes(input_midi),
+        note_map=(options or {}).get("note_map"),
+        options=options,
     )
     write_clean_midi(
         notes,

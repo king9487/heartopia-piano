@@ -31,6 +31,20 @@ def update_analysis_from_midi_path(app, midi_path):
     )
     if not report:
         clear_analysis_panel(app)
-        return
-    for field in ANALYSIS_FIELDS:
-        app.analysis_vars[field].set(_display_value(field, report[field]))
+    else:
+        for field in ANALYSIS_FIELDS:
+            app.analysis_vars[field].set(_display_value(field, report.get(field, "--")))
+
+    selected_stats = getattr(app, "selected_direct_midi_stats", None)
+    if selected_stats:
+        app.analysis_vars["Selected Notes"].set(str(selected_stats["notes"]))
+        app.analysis_vars["Selected Tracks"].set(str(selected_stats["tracks"]))
+        app.analysis_vars["Selected Channels"].set(str(selected_stats["channels"]))
+    profile_var = getattr(app, "keyboard_profile_var", None)
+    if report and profile_var is not None:
+        from keyboard_profiles import get_keyboard_profile
+
+        profile = get_keyboard_profile(profile_var.get())
+        app.analysis_vars["Keyboard Profile"].set(
+            f"{profile.name} ({profile.range_label})"
+        )

@@ -69,11 +69,14 @@ class YoutubeMidiApp(
     cached_choice_var: Any
     cached_outputs: list
     demucs_device_var: Any
+    separation_mode_var: Any
+    stem_to_convert_var: Any
     speed_var: Any
     countdown_var: Any
     transpose_var: Any
     chord_delay_var: Any
     min_hold_var: Any
+    keyboard_profile_var: Any
     processing_preset_var: Any
     min_note_duration_var: Any
     velocity_threshold_var: Any
@@ -174,6 +177,9 @@ class YoutubeMidiApp(
         self.stop_event.set()
         self.unregister_stop_hotkey()
         self.stop_studio_midi()
+        if self.selected_direct_temp_dir is not None:
+            self.selected_direct_temp_dir.cleanup()
+            self.selected_direct_temp_dir = None
         self.root.destroy()
 
     def on_key_transpose_changed(self, event=None):

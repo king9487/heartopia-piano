@@ -3,7 +3,9 @@ import threading
 import tkinter as tk
 
 from midi_analysis import ANALYSIS_FIELDS
+from keyboard_profiles import DEFAULT_KEYBOARD_PROFILE
 from tools import default_demucs_device
+from converter import DEFAULT_SEPARATION_MODE, DEFAULT_SEPARATION_STEM
 
 
 def initialize_app_state(app):
@@ -17,6 +19,7 @@ def initialize_app_state(app):
     app.stop_hotkey = None
 
     app.url_var = tk.StringVar()
+    app.workflow_var = tk.StringVar(value="studio_mode")
     app.input_source_var = tk.StringVar(value="youtube")
     app.external_midi_path_var = tk.StringVar()
     app.skip_cleanup_var = tk.BooleanVar(value=False)
@@ -28,6 +31,9 @@ def initialize_app_state(app):
     app.external_part_warning_var = tk.StringVar(value="")
     app.external_part_selections = {}
     app.external_part_tree_items = {}
+    app.selected_direct_temp_dir = None
+    app.selected_direct_midi_path = None
+    app.selected_direct_midi_stats = None
     app.external_midi_info_vars = {
         key: tk.StringVar(value="--")
         for key in (
@@ -48,11 +54,14 @@ def initialize_app_state(app):
     app.cached_choice_var = tk.StringVar()
     app.cached_outputs = []
     app.demucs_device_var = tk.StringVar(value=default_demucs_device() or "auto")
+    app.separation_mode_var = tk.StringVar(value=DEFAULT_SEPARATION_MODE)
+    app.stem_to_convert_var = tk.StringVar(value=DEFAULT_SEPARATION_STEM)
     app.speed_var = tk.DoubleVar(value=1.0)
     app.countdown_var = tk.IntVar(value=3)
     app.transpose_var = tk.IntVar(value=0)
     app.chord_delay_var = tk.IntVar(value=18)
     app.min_hold_var = tk.IntVar(value=75)
+    app.keyboard_profile_var = tk.StringVar(value=DEFAULT_KEYBOARD_PROFILE)
     app.processing_preset_var = tk.StringVar(value="Balanced")
     app.min_note_duration_var = tk.IntVar(value=35)
     app.velocity_threshold_var = tk.IntVar(value=12)
@@ -73,6 +82,7 @@ def initialize_app_state(app):
     app.analysis_vars = {
         field: tk.StringVar(value="--") for field in ANALYSIS_FIELDS
     }
+    app.analysis_vars["Keyboard Profile"].set("Heartopia (C3-C6)")
     app.studio_position_var = tk.DoubleVar(value=0.0)
     app.studio_current_time_var = tk.StringVar(value="00:00.000")
     app.studio_total_time_var = tk.StringVar(value="00:00.000")
@@ -133,3 +143,19 @@ def initialize_app_state(app):
     app.piano_roll_frame = None
     app.staff_view_frame = None
     app.staff_view = None
+    app.input_source_choices = None
+    app.conversion_options_frame = None
+    app.open_midi_button = None
+    app.open_converted_button = None
+    app.preview_button = None
+    app.main_log_frame = None
+    app.main_log_source_frame = None
+    app.main_status_frame = None
+    app.import_actions_frame = None
+    app.import_analysis_frame = None
+    app.import_selection_frame = None
+    app.import_optimizer_frame = None
+    app.playback_sources_frame = None
+    app.playback_compare_frame = None
+    app.playback_advanced_settings = ()
+    app.workflow_manager = None

@@ -221,7 +221,8 @@ def optimize_notes_with_rules(notes, options=None):
     max_notes = max(1, min(int(options.get("max_notes_per_window") or 2), 3))
     window_ms = max(10, int(options.get("window_ms") or 50))
     min_note_duration_ms = max(1, int(options.get("min_note_duration_ms") or 35))
-    notes = validate_note_dicts(notes)
+    note_map = options.get("note_map") or DEFAULT_NOTE_MAP
+    notes = validate_note_dicts(notes, note_map=note_map)
     notes = remove_isolated_short_notes(notes, min_note_duration_ms=min_note_duration_ms)
 
     grouped = {}
@@ -241,7 +242,7 @@ def optimize_notes_with_rules(notes, options=None):
         if ranked:
             previous_pitch = ranked[-1]["note"]
 
-    return validate_note_dicts(selected)
+    return validate_note_dicts(selected, note_map=note_map)
 
 
 def _normalize_optimizer_mode(mode):
@@ -308,7 +309,7 @@ def _accompaniment_pitch(pitch, melody_pitch, lowest, highest, bass=False):
 def arrange_piano_cover_notes(notes, note_map=None, options=None):
     """Reduce a transcription to a melody-first, three-note piano arrangement."""
     options = options or {}
-    note_map = note_map or DEFAULT_NOTE_MAP
+    note_map = note_map or options.get("note_map") or DEFAULT_NOTE_MAP
     lowest, highest = min(note_map), max(note_map)
     min_duration = max(0, int(options.get("min_note_duration_ms", 35))) / 1000
     velocity_threshold = max(0, int(options.get("velocity_threshold", 12)))
@@ -433,7 +434,7 @@ def arrange_piano_cover_notes(notes, note_map=None, options=None):
 def arrange_melody_only_notes(notes, note_map=None, options=None):
     """Extract the sustained highest line as a monophonic playable melody."""
     options = options or {}
-    note_map = note_map or DEFAULT_NOTE_MAP
+    note_map = note_map or options.get("note_map") or DEFAULT_NOTE_MAP
     lowest, highest = min(note_map), max(note_map)
     min_duration = max(0, int(options.get("min_note_duration_ms", 35))) / 1000
     velocity_threshold = max(0, int(options.get("velocity_threshold", 12)))
@@ -490,7 +491,11 @@ def arrange_piano_cover_midi(input_midi, output_midi=None, options=None):
         if output_midi
         else input_midi.with_name(PIANO_COVER_MIDI_NAME)
     )
-    notes = arrange_piano_cover_notes(read_midi_notes(input_midi), options=options)
+    notes = arrange_piano_cover_notes(
+        read_midi_notes(input_midi),
+        note_map=(options or {}).get("note_map"),
+        options=options,
+    )
     write_clean_midi(notes, output_midi, quantize_ms=(options or {}).get("final_quantize_ms", 10))
     return output_midi
 
@@ -569,14 +574,19 @@ def optimize_notes_with_openai(notes, options):
         payload = json.loads(response.read().decode("utf-8"))
 
     text = extract_json_from_response(payload).strip()
-    return validate_note_dicts(json.loads(text))
+    return validate_note_dicts(
+        json.loads(text), note_map=options.get("note_map") or DEFAULT_NOTE_MAP
+    )
 
 
 def optimize_chunk(notes, options):
     mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
     if mode == OPTIMIZER_OPENAI:
         try:
-            optimized = validate_note_dicts(optimize_notes_with_openai(notes, options))
+            optimized = validate_note_dicts(
+                optimize_notes_with_openai(notes, options),
+                note_map=options.get("note_map") or DEFAULT_NOTE_MAP,
+            )
             # The model-facing schema historically omitted tick metadata. When
             # start/duration are unchanged, reattach the source tick identity;
             # a changed start_ms remains an explicit model timing edit.
@@ -608,18 +618,19 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     output_midi = Path(output_midi) if output_midi else input_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
     options = {**DEFAULT_AI_OPTIMIZER_OPTIONS, **(options or {})}
 
-    notes = validate_note_dicts(midi_notes_to_dicts(input_midi))
+    note_map = options.get("note_map") or DEFAULT_NOTE_MAP
+    notes = validate_note_dicts(midi_notes_to_dicts(input_midi), note_map=note_map)
     optimized_notes = []
     for chunk in split_notes_into_chunks(notes, chunk_ms=options.get("chunk_ms", 8000)):
         optimized_notes.extend(optimize_chunk(chunk, options))
 
-    optimized_notes = validate_note_dicts(optimized_notes)
+    optimized_notes = validate_note_dicts(optimized_notes, note_map=note_map)
     write_clean_midi(dicts_to_rule_notes(optimized_notes), output_midi)
     return output_midi
 
 
-def detect_song_key(notes):
-    notes = validate_note_dicts(notes)
+def detect_song_key(notes, note_map=None):
+    notes = validate_note_dicts(notes, note_map=note_map)
     best_score = -1
     best_root = 0
     best_mode = "major"
@@ -701,7 +712,7 @@ def pitch_correct_notes(notes, options=None):
     min_short_ms = int(options.get("pitch_short_note_ms", 70))
     low_velocity = int(options.get("pitch_low_velocity", 35))
     notes = validate_note_dicts(notes, note_map=note_map)
-    key_info = detect_song_key(notes)
+    key_info = detect_song_key(notes, note_map=note_map)
     scale = key_info["scale"]
 
     corrected = []
@@ -749,8 +760,8 @@ def pitch_correct_37key_midi(input_midi, output_midi=None, options=None):
     return output_midi, key_info
 
 
-def detect_key_for_midi(input_midi):
-    return detect_song_key(midi_notes_to_dicts(input_midi))["name"]
+def detect_key_for_midi(input_midi, note_map=None):
+    return detect_song_key(midi_notes_to_dicts(input_midi), note_map=note_map)["name"]
 
 
 def smooth_note_events(notes, options=None):
@@ -758,7 +769,8 @@ def smooth_note_events(notes, options=None):
     options = options or {}
     min_duration_ms = max(20, int(options.get("final_min_duration_ms", 45)))
     quantize_ms = max(1, int(options.get("final_quantize_ms", 10)))
-    notes = validate_note_dicts(notes)
+    note_map = options.get("note_map") or DEFAULT_NOTE_MAP
+    notes = validate_note_dicts(notes, note_map=note_map)
 
     smoothed = []
     last_end_by_note = {}
@@ -793,7 +805,7 @@ def smooth_note_events(notes, options=None):
         )
         smoothed.append(smoothed_note)
 
-    return validate_note_dicts(smoothed)
+    return validate_note_dicts(smoothed, note_map=note_map)
 
 
 def smooth_37key_midi(input_midi, output_midi=None, options=None):

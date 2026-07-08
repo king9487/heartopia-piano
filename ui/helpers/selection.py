@@ -34,9 +34,9 @@ MIDI_SOURCE_PRIORITY = (
     "Transposed MIDI",
 )
 COMPARE_SOURCE_PRIORITY = (
+    "Imported MIDI",
     "Full Imported MIDI",
     "Selected Parts MIDI",
-    "Imported MIDI",
     "Imported",
     "Raw MIDI",
     "Clean",
@@ -129,7 +129,7 @@ class MidiSelectionMixin:
                 (
                     label
                     for label in (
-                        "Full Imported MIDI", "Imported MIDI", "Clean",
+                        "Imported MIDI", "Full Imported MIDI", "Clean",
                         "Clean 37-Key MIDI", "Raw MIDI",
                     )
                     if label in available
@@ -187,6 +187,7 @@ class MidiSelectionMixin:
 
         if self.results.get("input_source") == "external_midi":
             sources = {
+                "Imported MIDI": self.results.get("selected_direct_midi"),
                 "Full Imported MIDI": (
                     self.results.get("source_midi")
                     or self.results.get("imported_midi")

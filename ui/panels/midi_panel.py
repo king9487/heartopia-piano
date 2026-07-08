@@ -13,11 +13,18 @@ def build_main_midi_panel(app, parent, row):
     actions.grid(row=row + 1, column=0, sticky="ew", padx=12, pady=(0, 8))
     actions.grid(row=row, column=0, sticky="ew")
     actions.columnconfigure(6, weight=1)
-    ttk.Button(actions, text="Open MIDI", command=app.open_midi).grid(row=0, column=0)
-    ttk.Button(actions, text="Open Converted", command=app.open_converted).grid(
+    app.open_midi_button = ttk.Button(actions, text="Open MIDI", command=app.open_midi)
+    app.open_midi_button.grid(row=0, column=0)
+    app.open_converted_button = ttk.Button(
+        actions, text="Open Converted", command=app.open_converted
+    )
+    app.open_converted_button.grid(
         row=0, column=1, padx=(8, 0)
     )
-    ttk.Button(actions, text="Preview", command=app.preview_selected_midi).grid(
+    app.preview_button = ttk.Button(
+        actions, text="Preview", command=app.preview_selected_midi
+    )
+    app.preview_button.grid(
         row=0, column=2, padx=(8, 0)
     )
     app.play_button = ttk.Button(
@@ -33,6 +40,7 @@ def build_main_midi_panel(app, parent, row):
 
 def build_midi_sources_panel(app, parent, row=0):
     sources = ttk.LabelFrame(parent, text="Current MIDI source / version", padding=10)
+    app.playback_sources_frame = sources
     sources.grid(row=row, column=0, sticky="ew", padx=12, pady=(12, 8))
     sources.columnconfigure(3, weight=1)
     ttk.Radiobutton(
@@ -66,6 +74,7 @@ def build_midi_sources_panel(app, parent, row=0):
     app.midi_source_combo.bind("<<ComboboxSelected>>", app.on_midi_source_selected)
 
     compare = ttk.LabelFrame(parent, text="A/B Compare", padding=10)
+    app.playback_compare_frame = compare
     compare.grid(row=row + 1, column=0, sticky="ew", padx=12, pady=(0, 8))
     compare.columnconfigure(1, weight=1)
     compare.columnconfigure(4, weight=1)

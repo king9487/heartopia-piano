@@ -1,11 +1,14 @@
 from tkinter import ttk
 
+from converter import SEPARATION_MODES, SEPARATION_STEMS
+
 def build_convert_panel(app, parent, start_row=0):
     top = ttk.LabelFrame(parent, text="Input Source", padding=12)
     top.grid(row=start_row, column=0, sticky="ew")
     top.columnconfigure(0, weight=1)
 
     choices = ttk.Frame(top)
+    app.input_source_choices = choices
     choices.grid(row=0, column=0, sticky="w")
     for column, (text, value) in enumerate(
         (("YouTube Video", "youtube"), ("Audio File", "local_audio"), ("MIDI File", "external_midi"))
@@ -46,7 +49,7 @@ def build_convert_panel(app, parent, start_row=0):
     app.external_midi_input_frame.columnconfigure(1, weight=1)
     app.external_midi_button = ttk.Button(
         app.external_midi_input_frame,
-        text="Browse MIDI...",
+        text="Import MIDI...",
         command=app.browse_external_midi,
     )
     app.external_midi_button.grid(row=0, column=0, sticky="w")
@@ -55,6 +58,7 @@ def build_convert_panel(app, parent, start_row=0):
     ).grid(row=0, column=1, sticky="w", padx=(10, 0))
 
     conversion_options = ttk.Frame(convert)
+    app.conversion_options_frame = conversion_options
     conversion_options.grid(row=1, column=0, sticky="w", pady=(10, 0))
     ttk.Label(conversion_options, text="Demucs device").grid(row=0, column=0, sticky="w")
     ttk.Combobox(
@@ -69,6 +73,26 @@ def build_convert_panel(app, parent, start_row=0):
         text="Convert vocals MIDI",
         variable=app.convert_vocals_midi_var,
     ).grid(row=0, column=2, sticky="w")
+    ttk.Label(conversion_options, text="Separation Mode").grid(
+        row=1, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Combobox(
+        conversion_options,
+        textvariable=app.separation_mode_var,
+        values=SEPARATION_MODES,
+        state="readonly",
+        width=22,
+    ).grid(row=1, column=1, sticky="w", padx=(8, 20), pady=(8, 0))
+    ttk.Label(conversion_options, text="Stem to Convert").grid(
+        row=2, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Combobox(
+        conversion_options,
+        textvariable=app.stem_to_convert_var,
+        values=SEPARATION_STEMS,
+        state="readonly",
+        width=22,
+    ).grid(row=2, column=1, sticky="w", padx=(8, 20), pady=(8, 0))
 
     app.on_input_source_changed()
 
@@ -103,6 +127,11 @@ def build_import_panel(app, parent, start_row=0):
         state="disabled",
     )
     app.open_original_midi_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+    app.import_actions_frame = (
+        app.preview_original_midi_button,
+        app.play_original_midi_button,
+        app.open_original_midi_button,
+    )
 
     info = ttk.Frame(original)
     info.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
@@ -124,6 +153,7 @@ def build_import_panel(app, parent, start_row=0):
         )
 
     analysis = ttk.Frame(original)
+    app.import_analysis_frame = analysis
     analysis.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
     analysis.columnconfigure(0, weight=3)
     analysis.columnconfigure(1, weight=2)
@@ -193,6 +223,7 @@ def build_import_panel(app, parent, start_row=0):
     app.external_midi_channel_tree.configure(yscrollcommand=channel_scroll.set)
 
     selection_options = ttk.Frame(original)
+    app.import_selection_frame = selection_options
     selection_options.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
     ttk.Label(selection_options, text="Selected-part out-of-range handling:").grid(
         row=0, column=0, sticky="w"
@@ -207,6 +238,7 @@ def build_import_panel(app, parent, start_row=0):
             text=text,
             value=value,
             variable=app.external_part_range_mode_var,
+            command=app.on_external_direct_selection_changed,
         ).grid(row=row, column=0, sticky="w", padx=(14, 0))
     ttk.Label(
         selection_options,
@@ -217,6 +249,7 @@ def build_import_panel(app, parent, start_row=0):
     optimize = ttk.LabelFrame(
         parent, text="Optimize for Heartopia", padding=12
     )
+    app.import_optimizer_frame = optimize
     optimize.grid(row=start_row + 1, column=0, sticky="ew", padx=12, pady=(0, 12))
     app.process_external_midi_button = ttk.Button(
         optimize,

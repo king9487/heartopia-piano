@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 import mido
@@ -381,9 +382,11 @@ def write_clean_midi(notes, output_midi, quantize_ms=None):
     return output_midi
 
 
-def build_clean_37key_notes(input_midi, note_map=None, options=None):
-    note_map = note_map or DEFAULT_NOTE_MAP
+def build_clean_37key_notes(
+    input_midi, note_map=None, options=None, return_range_result=False
+):
     options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **(options or {})}
+    note_map = note_map or options.get("note_map") or DEFAULT_NOTE_MAP
 
     notes = read_midi_notes(input_midi)
     notes = clean_notes(
@@ -391,20 +394,52 @@ def build_clean_37key_notes(input_midi, note_map=None, options=None):
         min_note_duration_ms=options.get("min_note_duration_ms", 0),
         velocity_threshold=options.get("velocity_threshold", 0),
     )
-    notes = fit_notes_into_range(
-        notes,
-        note_map,
-        options.get("out_of_range_mode") or OCTAVE_FIT_SMART,
-    )
+    range_mode = options.get("out_of_range_mode") or OCTAVE_FIT_SMART
+    range_result = None
+    if range_mode == OCTAVE_FIT_SMART:
+        # Import lazily to keep the optimizer's scoring model independent from
+        # MIDI parsing/writing and avoid a module import cycle.
+        from range_optimizer import optimize_note_range
+
+        lowest, highest = playable_range(note_map)
+        range_result = optimize_note_range(
+            notes,
+            lowest,
+            highest,
+            preferred_melody_low=options.get("preferred_melody_low"),
+            preferred_melody_high=options.get("preferred_melody_high"),
+        )
+        notes = range_result.notes
+    else:
+        notes = fit_notes_into_range(notes, note_map, range_mode)
     notes = limit_notes_by_window(
         notes,
         int(options.get("max_simultaneous_notes") or 0),
         prefer_melody=bool(options.get("prefer_melody", True)),
     )
+    if return_range_result:
+        return notes, range_result
     return notes
 
 
 def convert_to_37key_midi(input_midi, output_midi, note_map=None, options=None):
     options = {**DEFAULT_37KEY_CLEAN_OPTIONS, **(options or {})}
-    notes = build_clean_37key_notes(input_midi, note_map=note_map, options=options)
-    return write_clean_midi(notes, output_midi, quantize_ms=options.get("quantize_ms"))
+    notes, range_result = build_clean_37key_notes(
+        input_midi,
+        note_map=note_map,
+        options=options,
+        return_range_result=True,
+    )
+    output = write_clean_midi(notes, output_midi, quantize_ms=options.get("quantize_ms"))
+
+    # Produce an inspectable decision report for smart mode.  Re-analysis is
+    # deliberately done before density limiting so strategy scores describe
+    # range optimization rather than a later cleanup stage.
+    if (options.get("out_of_range_mode") or OCTAVE_FIT_SMART) == OCTAVE_FIT_SMART:
+        from range_optimizer import RANGE_OPTIMIZATION_REPORT_NAME
+
+        report_path = Path(output_midi).with_name(RANGE_OPTIMIZATION_REPORT_NAME)
+        report_path.write_text(
+            json.dumps(range_result.to_dict(), indent=2), encoding="utf-8"
+        )
+    return output
