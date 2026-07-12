@@ -80,6 +80,11 @@ def build_studio_panel(app, parent):
     ttk.Button(
         range_tools, text="Export Range", command=app.export_selected_range
     ).grid(row=0, column=5, sticky="w", padx=(8, 0))
+    ttk.Button(
+        range_tools,
+        text="Trim Leading Silence and Export",
+        command=app.trim_leading_silence_and_export,
+    ).grid(row=0, column=6, sticky="w", padx=(8, 0))
 
     build_midi_editor_panel(app, parent, row=4)
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import mido
 
+from midi_import import safe_load_midi
 from midi_rule_engine import read_midi_notes
 from midi_to_keyboard import DEFAULT_NOTE_MAP
 
@@ -52,6 +53,7 @@ MIDI_ANALYSIS_REPORT_NAME = "report.json"
 ANALYSIS_FIELDS = (
     "Keyboard Profile",
     "Mapping Profile",
+    "Import Status",
     "Song Duration",
     "Tempo",
     "Detected Key",
@@ -81,7 +83,7 @@ def midi_note_count(midi_path):
 
 def midi_duration_and_tempo(midi_path):
     midi_path = Path(midi_path)
-    midi = mido.MidiFile(midi_path)
+    midi = safe_load_midi(midi_path)
     tempo = 500000
     for track in midi.tracks:
         tempo_message = next(
@@ -202,9 +204,9 @@ def _midi_duration_without_merge(midi):
 
 
 def inspect_midi_file(midi_path):
-    """Return source-file metadata without creating or changing any files."""
+    """Return source-file metadata without changing the source MIDI file."""
     midi_path = Path(midi_path)
-    midi = mido.MidiFile(midi_path)
+    midi = safe_load_midi(midi_path)
     tempo_message = next(
         (
             message
@@ -338,6 +340,15 @@ def inspect_midi_file(midi_path):
 
     return {
         "source_path": str(midi_path.resolve()),
+        "sanitized_path": (
+            str(midi.sanitized_path.resolve())
+            if getattr(midi, "sanitized_path", None)
+            else None
+        ),
+        "import_repaired": bool(getattr(midi, "import_repaired", False)),
+        "import_status": (
+            "Repaired" if getattr(midi, "import_repaired", False) else "Original"
+        ),
         "file_name": midi_path.name,
         "duration": duration,
         "bpm": (
@@ -368,6 +379,7 @@ def build_midi_analysis_report(
     detected_key,
     arrangement_statistics=None,
     keyboard_profile="Heartopia",
+    import_repaired=False,
 ):
     arrangement_statistics = arrangement_statistics or {}
     duration, tempo = midi_duration_and_tempo(raw_midi)
@@ -375,6 +387,7 @@ def build_midi_analysis_report(
     selected_parts = inspect_midi_file(raw_midi).get("musical_parts", ())
     return {
         "Keyboard Profile": keyboard_profile,
+        "Import Status": "Repaired" if import_repaired else "Original",
         "Song Duration": round(duration, 3),
         "Tempo": round(tempo, 2),
         "Detected Key": detected_key or "Unknown",

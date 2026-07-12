@@ -23,7 +23,20 @@ def build_log_panel(app, parent, row):
     scrollbar.grid(row=0, column=1, sticky="ns")
     app.log.configure(yscrollcommand=scrollbar.set)
 
+    notice = tk.Label(
+        parent,
+        textvariable=app.import_repair_notice_var,
+        bg="#fff3cd",
+        fg="#664d03",
+        anchor="w",
+        padx=12,
+        pady=6,
+    )
+    app.import_repair_notice_frame = notice
+    notice.grid(row=row + 2, column=0, sticky="ew", padx=12, pady=(0, 8))
+    notice.grid_remove()
+
     status = ttk.Label(parent, textvariable=app.status_var, padding=(12, 0, 12, 12))
     app.main_status_frame = status
-    status.grid(row=row + 2, column=0, sticky="ew")
+    status.grid(row=row + 3, column=0, sticky="ew")
     parent.rowconfigure(row + 1, weight=1)

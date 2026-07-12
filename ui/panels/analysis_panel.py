@@ -8,8 +8,8 @@ def build_analysis_panel(app, parent, row):
         (
             "Song Information",
             (
-                "Keyboard Profile", "Mapping Profile", "Song Duration",
-                "Tempo", "Detected Key",
+                "Keyboard Profile", "Mapping Profile", "Import Status",
+                "Song Duration", "Tempo", "Detected Key",
             ),
         ),
         (

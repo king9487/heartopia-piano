@@ -7,7 +7,11 @@ from tkinter import messagebox
 import mido
 
 from midi_range import CHORUS_MIDI_NAME, export_midi_range
-from midi_to_keyboard import midi_note_name
+from midi_to_keyboard import (
+    TRIMMED_LEADING_SILENCE_MIDI_NAME,
+    midi_note_name,
+    trim_leading_silence_midi,
+)
 
 
 class UiStudioActionsMixin:
@@ -330,3 +334,37 @@ class UiStudioActionsMixin:
 
         self.status_var.set("MIDI range exported")
         self.log_message(f"Exported MIDI range: {output_path}")
+
+    @staticmethod
+    def unique_trimmed_midi_path(midi_path):
+        output_path = midi_path.parent / TRIMMED_LEADING_SILENCE_MIDI_NAME
+        if not output_path.exists():
+            return output_path
+        stem = output_path.stem
+        suffix = output_path.suffix
+        for index in range(2, 1000):
+            candidate = output_path.with_name(f"{stem}_{index}{suffix}")
+            if not candidate.exists():
+                return candidate
+        raise ValueError("Could not find an available trimmed MIDI filename.")
+
+    def trim_leading_silence_and_export(self):
+        midi_path = self.get_selected_midi()
+        if not midi_path:
+            return
+        output_path = self.unique_trimmed_midi_path(midi_path)
+        mapping_profile = self.get_selected_mapping_profile()
+        try:
+            trim_leading_silence_midi(
+                midi_path,
+                output_path,
+                mapping_profile=mapping_profile,
+                out_of_range_mode=self.octave_fit_var.get(),
+                log_callback=self.log_message,
+            )
+        except Exception as exc:
+            messagebox.showerror("Trim export failed", str(exc))
+            return
+
+        self.status_var.set("Trimmed MIDI exported")
+        self.log_message(f"Trimmed leading silence export: {output_path}")

@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import keyboard
 import mido
@@ -25,6 +26,7 @@ DEFAULT_37KEY_CLEAN_OPTIONS = {
     "prefer_melody": True,
     "quantize_ms": None,
 }
+TRIMMED_LEADING_SILENCE_MIDI_NAME = "trimmed_leading_silence.mid"
 
 
 def midi_note_name(note):
@@ -39,6 +41,186 @@ def is_note_off(message):
     )
 
 
+def _resolve_playback_maps(note_map=None, mapping_profile=None, keyboard_map=None):
+    if mapping_profile is not None:
+        note_map = dict(mapping_profile.mappings)
+        keyboard_map = mapping_profile.keyboard_map
+    if note_map is None:
+        note_map = DEFAULT_NOTE_MAP
+    if keyboard_map is None:
+        keyboard_map = note_map
+    return note_map, keyboard_map
+
+
+def _mapped_playable_note(note, note_map, keyboard_map, out_of_range_mode="keep"):
+    mapped_note = note
+    if mapped_note not in note_map and out_of_range_mode == "octave_shift":
+        mapped_note = octave_shift_note(mapped_note, note_map)
+    if mapped_note is None:
+        return None
+    if keyboard_map.get(mapped_note) is None:
+        return None
+    return mapped_note
+
+
+def _log_skipped_leading_silence(
+    offset_seconds, log_callback=None, minimum_offset=0.0005
+):
+    if offset_seconds <= minimum_offset:
+        return
+    message = f"Skipped leading silence: {offset_seconds:.3f} seconds"
+    if log_callback is not None:
+        log_callback(message)
+    else:
+        print(message)
+
+
+def _tick_to_seconds(midi, target_tick):
+    tempo_changes = [(0, 500000)]
+    for track in midi.tracks:
+        absolute_tick = 0
+        for message in track:
+            absolute_tick += message.time
+            if message.type == "set_tempo":
+                tempo_changes.append((absolute_tick, message.tempo))
+    tempo_changes.sort(key=lambda item: item[0])
+
+    seconds = 0.0
+    previous_tick = 0
+    tempo = 500000
+    for change_tick, new_tempo in tempo_changes:
+        if change_tick > target_tick:
+            break
+        if change_tick > previous_tick:
+            seconds += mido.tick2second(
+                change_tick - previous_tick, midi.ticks_per_beat, tempo
+            )
+            previous_tick = change_tick
+        tempo = new_tempo
+    if target_tick > previous_tick:
+        seconds += mido.tick2second(
+            target_tick - previous_tick, midi.ticks_per_beat, tempo
+        )
+    return seconds
+
+
+def skip_leading_silence_in_schedule(
+    schedule,
+    log_callback=None,
+    log_time_multiplier=1.0,
+):
+    """Shift an already-filtered schedule so the first note-on starts at zero."""
+    first_note_on = min(
+        (timestamp for timestamp, action, _note, _key in schedule if action == "down"),
+        default=0.0,
+    )
+    if first_note_on <= 0:
+        return schedule
+
+    _log_skipped_leading_silence(
+        first_note_on * log_time_multiplier,
+        log_callback=log_callback,
+    )
+    return [
+        (timestamp - first_note_on, action, note, key)
+        for timestamp, action, note, key in schedule
+    ]
+
+
+def find_first_playable_note_tick(
+    midi_path,
+    note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    part_filter=None,
+    out_of_range_mode="keep",
+):
+    note_map, keyboard_map = _resolve_playback_maps(
+        note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+    )
+    selected_parts = set(part_filter) if part_filter is not None else None
+    midi = mido.MidiFile(midi_path)
+    first_tick = None
+    for track_index, track in enumerate(midi.tracks):
+        absolute_tick = 0
+        for message in track:
+            absolute_tick += message.time
+            if message.type != "note_on" or message.velocity <= 0:
+                continue
+            if (
+                selected_parts is not None
+                and (track_index, message.channel) not in selected_parts
+            ):
+                continue
+            if (
+                _mapped_playable_note(
+                    message.note,
+                    note_map,
+                    keyboard_map,
+                    out_of_range_mode=out_of_range_mode,
+                )
+                is None
+            ):
+                continue
+            first_tick = (
+                absolute_tick
+                if first_tick is None
+                else min(first_tick, absolute_tick)
+            )
+    return first_tick
+
+
+def trim_leading_silence_midi(
+    input_midi,
+    output_midi,
+    note_map=None,
+    mapping_profile=None,
+    keyboard_map=None,
+    part_filter=None,
+    out_of_range_mode="keep",
+    log_callback=None,
+):
+    """Write a shifted copy where the first playable note starts at tick zero."""
+    input_path = Path(input_midi)
+    output_path = Path(output_midi)
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("output_midi must be different from input_midi")
+
+    offset_tick = find_first_playable_note_tick(
+        input_path,
+        note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+        part_filter=part_filter,
+        out_of_range_mode=out_of_range_mode,
+    )
+    if offset_tick is None:
+        raise ValueError("No mapped playable note events found in this MIDI file.")
+
+    midi = mido.MidiFile(input_path)
+    output = mido.MidiFile(type=midi.type, ticks_per_beat=midi.ticks_per_beat)
+    for track in midi.tracks:
+        shifted_track = mido.MidiTrack()
+        output.tracks.append(shifted_track)
+        absolute_tick = 0
+        emitted_tick = 0
+        for message in track:
+            absolute_tick += message.time
+            shifted_tick = max(0, absolute_tick - offset_tick)
+            shifted_track.append(message.copy(time=shifted_tick - emitted_tick))
+            emitted_tick = shifted_tick
+
+    output.save(output_path)
+    if offset_tick > 0:
+        _log_skipped_leading_silence(
+            _tick_to_seconds(midi, offset_tick),
+            log_callback=log_callback,
+        )
+    return output_path
+
+
 def build_original_keyboard_schedule(
     midi_path,
     note_map=None,
@@ -50,17 +232,16 @@ def build_original_keyboard_schedule(
     end_sec=None,
     part_filter=None,
     out_of_range_mode="keep",
+    skip_leading_silence=False,
 ):
     """Map source note messages directly without rebuilding note objects."""
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
-    if mapping_profile is not None:
-        note_map = dict(mapping_profile.mappings)
-        keyboard_map = mapping_profile.keyboard_map
-    if note_map is None:
-        note_map = DEFAULT_NOTE_MAP
-    if keyboard_map is None:
-        keyboard_map = note_map
+    note_map, keyboard_map = _resolve_playback_maps(
+        note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+    )
     range_start = 0.0 if start_sec is None else float(start_sec)
     range_end = None if end_sec is None else float(end_sec)
     if range_start < 0:
@@ -136,6 +317,12 @@ def build_original_keyboard_schedule(
                 log_callback(message)
             else:
                 print(message)
+    if skip_leading_silence:
+        schedule = skip_leading_silence_in_schedule(
+            schedule,
+            log_callback=log_callback,
+            log_time_multiplier=speed,
+        )
     return schedule
 
 
@@ -470,13 +657,11 @@ def build_clean_note_events(
     melody_max_notes=1,
     out_of_range_mode=None,
 ):
-    if mapping_profile is not None:
-        note_map = dict(mapping_profile.mappings)
-        keyboard_map = mapping_profile.keyboard_map
-    if note_map is None:
-        note_map = DEFAULT_NOTE_MAP
-    if keyboard_map is None:
-        keyboard_map = note_map
+    note_map, keyboard_map = _resolve_playback_maps(
+        note_map=note_map,
+        mapping_profile=mapping_profile,
+        keyboard_map=keyboard_map,
+    )
     if out_of_range_mode is not None:
         octave_fit_mode = out_of_range_mode
     clean_events = []
@@ -657,6 +842,7 @@ def build_keyboard_schedule(
     out_of_range_mode=None,
     start_sec=None,
     end_sec=None,
+    skip_leading_silence=False,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -708,6 +894,12 @@ def build_keyboard_schedule(
         schedule.append((release_time, "up", event.note, event.key))
 
     schedule.sort(key=lambda event: (event[0], 0 if event[1] == "up" else 1))
+    if skip_leading_silence:
+        schedule = skip_leading_silence_in_schedule(
+            schedule,
+            log_callback=log_callback,
+            log_time_multiplier=speed,
+        )
     return schedule
 
 
@@ -734,6 +926,7 @@ def play_midi_as_keyboard(
     out_of_range_mode=None,
     start_sec=None,
     end_sec=None,
+    skip_leading_silence=False,
 ):
     if speed <= 0:
         raise ValueError("speed must be greater than 0")
@@ -762,6 +955,7 @@ def play_midi_as_keyboard(
         out_of_range_mode=out_of_range_mode,
         start_sec=start_sec,
         end_sec=end_sec,
+        skip_leading_silence=skip_leading_silence,
     )
 
     try:
@@ -800,6 +994,7 @@ def play_original_midi_as_keyboard(
     end_sec=None,
     part_filter=None,
     out_of_range_mode="keep",
+    skip_leading_silence=False,
 ):
     """Play source note_on/note_off messages with no RuleNote cleanup path."""
     schedule = build_original_keyboard_schedule(
@@ -807,6 +1002,7 @@ def play_original_midi_as_keyboard(
         keyboard_map=keyboard_map, log_callback=log_callback, speed=speed,
         start_sec=start_sec, end_sec=end_sec,
         part_filter=part_filter, out_of_range_mode=out_of_range_mode,
+        skip_leading_silence=skip_leading_silence,
     )
     active_counts = {}
     started_at = time.perf_counter()

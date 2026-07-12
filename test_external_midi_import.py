@@ -1,5 +1,7 @@
 import hashlib
+import io
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -7,6 +9,7 @@ from unittest.mock import patch
 import mido
 
 from converter import import_external_midi, write_selected_parts_midi
+from midi_import import safe_load_midi
 from midi_analysis import inspect_midi_file
 from midi_to_keyboard import build_original_keyboard_schedule
 
@@ -24,7 +27,133 @@ def write_midi(path, *, ppq=480, tracks=1, tempo=500000, notes=(60, 64, 76)):
     midi.save(path)
 
 
+def _variable_length_quantity(value):
+    bytes_ = [value & 0x7f]
+    value >>= 7
+    while value:
+        bytes_.append((value & 0x7f) | 0x80)
+        value >>= 7
+    return bytes(reversed(bytes_))
+
+
+def write_raw_midi(path, events, *, ppq=480):
+    track_data = b"".join(
+        _variable_length_quantity(delta) + bytes(message)
+        for delta, message in events
+    )
+    track_data += b"\x00\xff\x2f\x00"
+    path.write_bytes(
+        b"MThd"
+        + (6).to_bytes(4, "big")
+        + (0).to_bytes(2, "big")
+        + (1).to_bytes(2, "big")
+        + ppq.to_bytes(2, "big")
+        + b"MTrk"
+        + len(track_data).to_bytes(4, "big")
+        + track_data
+    )
+
+
 class ExternalMidiImportTests(unittest.TestCase):
+    def test_safe_load_midi_repairs_invalid_data_bytes_and_writes_copy(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "bad-note.mid"
+            sanitized = root / "output" / "imported_sanitized.mid"
+            write_raw_midi(
+                source,
+                (
+                    (0, (0x90, 128, 64)),
+                    (480, (0x80, 128, 0)),
+                ),
+            )
+            source_bytes = source.read_bytes()
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                midi = safe_load_midi(source, sanitized_path=sanitized)
+
+            self.assertTrue(midi.import_repaired)
+            self.assertTrue(sanitized.is_file())
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(
+                [message.note for message in midi.tracks[0] if message.type == "note_on"],
+                [127],
+            )
+            log = stdout.getvalue()
+            self.assertIn("Original import failed:", log)
+            self.assertIn("<data byte must be in range 0..127>", log)
+            self.assertIn("Retry with clip=True...", log)
+            self.assertIn("WARNING:", log)
+            self.assertIn("Invalid MIDI data bytes detected.", log)
+            self.assertIn("Values outside 0..127 were clipped.", log)
+            self.assertIn("Import repaired successfully.", log)
+
+    def test_malformed_midi_import_cases_are_repaired_without_crashing(self):
+        cases = {
+            "invalid-note.mid": (
+                (0, (0x90, 128, 64)),
+                (480, (0x80, 128, 0)),
+            ),
+            "invalid-velocity.mid": (
+                (0, (0x90, 60, 200)),
+                (480, (0x80, 60, 0)),
+            ),
+            "invalid-cc-value.mid": (
+                (0, (0xB0, 7, 200)),
+            ),
+            "invalid-program.mid": (
+                (0, (0xC0, 200)),
+            ),
+        }
+        skips = {
+            "cleanup": True,
+            "piano_arranger": True,
+            "ai_optimizer": True,
+            "pitch_correction": True,
+        }
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for filename, events in cases.items():
+                with self.subTest(filename=filename):
+                    source = root / filename
+                    write_raw_midi(source, events)
+                    source_bytes = source.read_bytes()
+
+                    result = import_external_midi(
+                        source,
+                        output_root=root / "output",
+                        skips=skips,
+                    )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertTrue(result["import_repaired"])
+                    self.assertTrue(result["sanitized_midi"].is_file())
+                    self.assertEqual(
+                        result["sanitized_midi"],
+                        root / "output" / "imported_sanitized.mid",
+                    )
+                    self.assertTrue(result["imported_midi"].is_file())
+                    self.assertTrue(result["final_midi"].is_file())
+                    self.assertEqual(
+                        result["analysis_report"]["Import Status"],
+                        "Repaired",
+                    )
+                    self.assertEqual(
+                        inspect_midi_file(result["imported_midi"])["import_status"],
+                        "Original",
+                    )
+
+    def test_unrepairable_midi_raises_clear_message(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "not-midi.mid"
+            source.write_bytes(b"not a midi file")
+
+            with self.assertRaisesRegex(
+                ValueError, "This MIDI file cannot be repaired automatically."
+            ):
+                safe_load_midi(source, sanitized_path=Path(directory) / "fixed.mid")
+
     def test_type_two_midi_is_normalized_only_in_the_working_copy(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

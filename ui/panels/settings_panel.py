@@ -17,7 +17,13 @@ def build_settings_panel(app, parent, start_row=0):
     )
     always_top.grid(row=0, column=0, columnspan=2, sticky="w")
     advanced_widgets.append(always_top)
-    ttk.Label(panel, text="Speed").grid(row=1, column=0, sticky="w", pady=(10, 0))
+    skip_silence = ttk.Checkbutton(
+        panel,
+        text="Skip leading silence",
+        variable=app.skip_leading_silence_var,
+    )
+    skip_silence.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(panel, text="Speed").grid(row=2, column=0, sticky="w", pady=(10, 0))
     ttk.Spinbox(
         panel,
         from_=0.25,
@@ -25,9 +31,9 @@ def build_settings_panel(app, parent, start_row=0):
         increment=0.25,
         textvariable=app.speed_var,
         width=8,
-    ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+    ).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
     focus_label = ttk.Label(panel, text="Focus delay")
-    focus_label.grid(row=2, column=0, sticky="w", pady=(8, 0))
+    focus_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
     focus_input = ttk.Spinbox(
         panel,
         from_=1,
@@ -36,9 +42,9 @@ def build_settings_panel(app, parent, start_row=0):
         textvariable=app.countdown_var,
         width=8,
     )
-    focus_input.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    focus_input.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
     advanced_widgets.extend((focus_label, focus_input))
-    ttk.Label(panel, text="Transpose").grid(row=3, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(panel, text="Transpose").grid(row=4, column=0, sticky="w", pady=(8, 0))
     ttk.Spinbox(
         panel,
         from_=-36,
@@ -46,9 +52,9 @@ def build_settings_panel(app, parent, start_row=0):
         increment=1,
         textvariable=app.transpose_var,
         width=8,
-    ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    ).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
     chord_label = ttk.Label(panel, text="Chord gap ms")
-    chord_label.grid(row=4, column=0, sticky="w", pady=(8, 0))
+    chord_label.grid(row=5, column=0, sticky="w", pady=(8, 0))
     chord_input = ttk.Spinbox(
         panel,
         from_=0,
@@ -57,9 +63,9 @@ def build_settings_panel(app, parent, start_row=0):
         textvariable=app.chord_delay_var,
         width=8,
     )
-    chord_input.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    chord_input.grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
     hold_label = ttk.Label(panel, text="Min hold ms")
-    hold_label.grid(row=5, column=0, sticky="w", pady=(8, 0))
+    hold_label.grid(row=6, column=0, sticky="w", pady=(8, 0))
     hold_input = ttk.Spinbox(
         panel,
         from_=20,
@@ -68,11 +74,11 @@ def build_settings_panel(app, parent, start_row=0):
         textvariable=app.min_hold_var,
         width=8,
     )
-    hold_input.grid(row=5, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+    hold_input.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
     advanced_widgets.extend((chord_label, chord_input, hold_label, hold_input))
 
     ttk.Label(panel, text="Keyboard Profile").grid(
-        row=6, column=0, sticky="w", pady=(8, 0)
+        row=7, column=0, sticky="w", pady=(8, 0)
     )
     profile_combo = ttk.Combobox(
         panel,
@@ -82,12 +88,12 @@ def build_settings_panel(app, parent, start_row=0):
         width=22,
     )
     profile_combo.grid(
-        row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=7, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     profile_combo.bind("<<ComboboxSelected>>", app.on_keyboard_profile_changed)
 
     ttk.Label(panel, text="Mapping Profile").grid(
-        row=7, column=0, sticky="w", pady=(8, 0)
+        row=8, column=0, sticky="w", pady=(8, 0)
     )
     mapping_combo = ttk.Combobox(
         panel,
@@ -97,7 +103,7 @@ def build_settings_panel(app, parent, start_row=0):
         width=22,
     )
     mapping_combo.grid(
-        row=7, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=8, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     mapping_combo.bind("<<ComboboxSelected>>", app.on_mapping_profile_changed)
     app.playback_mapping_profile_combo = mapping_combo

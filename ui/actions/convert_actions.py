@@ -53,6 +53,9 @@ class UiConvertActionsMixin:
         if not preserve_sources:
             self.results = None
             self.clear_midi_source_options()
+            clear_notice = getattr(self, "clear_import_repair_notice", None)
+            if clear_notice is not None:
+                clear_notice()
         self.converting = True
         self.convert_cancel_token = CancellationToken()
         self.status_var.set(status)
@@ -141,7 +144,17 @@ class UiConvertActionsMixin:
         self.results = {
             "input_source": "external_midi",
             "source_midi": Path(filename),
-            "imported_midi": Path(filename),
+            "imported_midi": (
+                Path(metadata["sanitized_path"])
+                if metadata.get("import_repaired")
+                else Path(filename)
+            ),
+            "sanitized_midi": (
+                Path(metadata["sanitized_path"])
+                if metadata.get("sanitized_path")
+                else None
+            ),
+            "import_repaired": bool(metadata.get("import_repaired")),
         }
         self.create_selected_direct_midi()
         self.update_selected_midi()
@@ -154,6 +167,14 @@ class UiConvertActionsMixin:
             if button is not None:
                 button.configure(state="normal")
         self.status_var.set("Imported MIDI selected")
+        if metadata.get("import_repaired"):
+            show_notice = getattr(self, "show_import_repair_notice", None)
+            if show_notice is not None:
+                show_notice()
+        else:
+            clear_notice = getattr(self, "clear_import_repair_notice", None)
+            if clear_notice is not None:
+                clear_notice()
         self.log_message(f"Imported MIDI ready for direct playback: {filename}")
 
     def show_external_midi_metadata(self, metadata):
@@ -194,6 +215,12 @@ class UiConvertActionsMixin:
         source_path = metadata.get("source_path")
         if source_path:
             self.log_message(f"Original MIDI source: {source_path}")
+        if metadata.get("import_repaired"):
+            self.log_message("Import Status: Repaired")
+            if metadata.get("sanitized_path"):
+                self.log_message(f"Repaired working copy: {metadata['sanitized_path']}")
+        else:
+            self.log_message("Import Status: Original")
         source_tracks = metadata.get("notes_per_track", ())
         self.log_message(f"Original MIDI track count: {len(source_tracks)}")
         for track in source_tracks:
@@ -409,6 +436,10 @@ class UiConvertActionsMixin:
                     tree.delete(item)
 
     def get_imported_original_midi(self, show_error=True):
+        if self.results and self.results.get("imported_midi"):
+            midi_path = Path(self.results["imported_midi"])
+            if midi_path.is_file():
+                return midi_path
         filename = self.external_midi_path_var.get().strip()
         midi_path = Path(filename) if filename else None
         if not midi_path or not midi_path.is_file():

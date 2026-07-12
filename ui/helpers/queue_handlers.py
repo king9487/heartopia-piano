@@ -73,6 +73,14 @@ class UiQueueHandlersMixin:
         self.converting = False
         self.convert_cancel_token = None
         self.show_external_midi_metadata(payload["metadata"])
+        if payload.get("import_repaired"):
+            show_notice = getattr(self, "show_import_repair_notice", None)
+            if show_notice is not None:
+                show_notice()
+        else:
+            clear_notice = getattr(self, "clear_import_repair_notice", None)
+            if clear_notice is not None:
+                clear_notice()
         self.update_selected_midi()
         if self.direct_preview_var.get() and "Final" in self.available_midi_sources:
             self.midi_source_var.set("Final")
@@ -81,6 +89,8 @@ class UiQueueHandlersMixin:
         self._restore_conversion_buttons()
         self.log_message(f"External MIDI output folder: {payload['base_dir']}")
         self.log_message(f"Imported working copy: {payload['imported_midi']}")
+        if payload.get("sanitized_midi"):
+            self.log_message(f"Sanitized repaired copy: {payload['sanitized_midi']}")
         self.log_message(f"Selected Parts MIDI: {payload['selected_parts_midi']}")
         self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
         self.set_status("Processing completed.")

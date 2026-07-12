@@ -59,6 +59,7 @@ def initialize_app_state(app):
     app.stem_to_convert_var = tk.StringVar(value=DEFAULT_SEPARATION_STEM)
     app.speed_var = tk.DoubleVar(value=1.0)
     app.countdown_var = tk.IntVar(value=3)
+    app.skip_leading_silence_var = tk.BooleanVar(value=False)
     app.transpose_var = tk.IntVar(value=0)
     app.chord_delay_var = tk.IntVar(value=18)
     app.min_hold_var = tk.IntVar(value=75)
@@ -83,6 +84,7 @@ def initialize_app_state(app):
     app.range_start_var = tk.DoubleVar(value=0.0)
     app.range_end_var = tk.DoubleVar(value=30.0)
     app.status_var = tk.StringVar(value="Ready")
+    app.import_repair_notice_var = tk.StringVar(value="")
     app.analysis_vars = {
         field: tk.StringVar(value="--") for field in ANALYSIS_FIELDS
     }

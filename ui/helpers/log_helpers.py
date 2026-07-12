@@ -10,3 +10,21 @@ class UiLogHelpersMixin:
 
     def set_status(self, message):
         self.status_var.set(message)
+
+    def show_import_repair_notice(self):
+        notice_var = getattr(self, "import_repair_notice_var", None)
+        if notice_var is not None:
+            notice_var.set(
+                "⚠ Invalid MIDI detected.\nA repaired working copy is being used."
+            )
+        notice = getattr(self, "import_repair_notice_frame", None)
+        if notice is not None:
+            notice.grid()
+
+    def clear_import_repair_notice(self):
+        notice_var = getattr(self, "import_repair_notice_var", None)
+        if notice_var is not None:
+            notice_var.set("")
+        notice = getattr(self, "import_repair_notice_frame", None)
+        if notice is not None:
+            notice.grid_remove()

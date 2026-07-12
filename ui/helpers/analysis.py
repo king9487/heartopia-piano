@@ -16,6 +16,8 @@ def _display_value(field, value):
         return f"{int(minutes):02d}:{seconds:06.3f}"
     if field == "Tempo":
         return f"{float(value):g} BPM"
+    if field == "Import Status":
+        return "⚠ Repaired" if value == "Repaired" else "✓ Original"
     return str(value)
 
 

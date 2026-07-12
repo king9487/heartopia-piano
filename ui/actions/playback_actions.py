@@ -117,6 +117,7 @@ class UiPlaybackActionsMixin:
         if speed <= 0 or countdown < 1 or chord_delay < 0 or min_hold < 0:
             messagebox.showerror("Invalid setting", "Playback settings are out of range.")
             return
+        skip_leading_silence = bool(self.skip_leading_silence_var.get())
 
         self.playing = True
         self.stop_event.clear()
@@ -151,6 +152,7 @@ class UiPlaybackActionsMixin:
                 original_part_filter,
                 original_range_mode,
                 mapping_profile,
+                skip_leading_silence,
             ),
             daemon=True,
         )
@@ -170,6 +172,7 @@ class UiPlaybackActionsMixin:
         original_part_filter=None,
         original_range_mode="keep",
         mapping_profile=None,
+        skip_leading_silence=False,
     ):
         try:
             log_callback = lambda message: self.queue.put(("log", message))
@@ -187,6 +190,7 @@ class UiPlaybackActionsMixin:
                     end_sec=end_sec,
                     part_filter=original_part_filter,
                     out_of_range_mode=original_range_mode,
+                    skip_leading_silence=skip_leading_silence,
                 )
             else:
                 play_midi_as_keyboard(
@@ -199,6 +203,7 @@ class UiPlaybackActionsMixin:
                     min_hold=min_hold,
                     start_sec=start_sec,
                     end_sec=end_sec,
+                    skip_leading_silence=skip_leading_silence,
                     **cleanup_settings,
                 )
             self.queue.put(("play_done", None))

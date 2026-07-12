@@ -6,6 +6,7 @@ import subprocess
 
 import mido
 
+from midi_import import SANITIZED_IMPORT_NAME, safe_load_midi
 from midi_ai_optimizer import (
     AI_OPTIMIZED_MIDI_NAME,
     FINAL_37KEY_MIDI_NAME,
@@ -197,13 +198,30 @@ def import_external_midi(
 
     # Parse before copying so malformed files fail without leaving a partial job.
     report_progress("Reading imported MIDI...")
-    metadata = inspect_midi_file(source)
     base_dir = output_dir_for_midi_file(source, output_root=output_root)
     base_dir.mkdir(parents=True, exist_ok=True)
+    sanitized_midi = Path(output_root) / SANITIZED_IMPORT_NAME
+    working_midi = safe_load_midi(source, sanitized_path=sanitized_midi)
+    load_source = (
+        Path(working_midi.sanitized_path)
+        if getattr(working_midi, "import_repaired", False)
+        else source
+    )
+    metadata = inspect_midi_file(load_source)
+    metadata["source_path"] = str(source.resolve())
+    metadata["sanitized_path"] = (
+        str(Path(working_midi.sanitized_path).resolve())
+        if getattr(working_midi, "import_repaired", False)
+        else None
+    )
+    metadata["import_repaired"] = bool(getattr(working_midi, "import_repaired", False))
+    metadata["import_status"] = (
+        "Repaired" if metadata["import_repaired"] else "Original"
+    )
     imported_midi = base_dir / "imported.mid"
     report_progress("Creating MIDI working copy...")
-    if source.resolve() != imported_midi.resolve():
-        shutil.copy2(source, imported_midi)
+    if load_source.resolve() != imported_midi.resolve():
+        shutil.copy2(load_source, imported_midi)
     working_midi = mido.MidiFile(imported_midi)
     if working_midi.type == 2:
         # The existing pipeline consumes a single synchronous performance.
@@ -307,6 +325,7 @@ def import_external_midi(
         detected_key,
         arrangement_statistics=arrangement_statistics,
         keyboard_profile=options.get("keyboard_profile", "Heartopia"),
+        import_repaired=metadata["import_repaired"],
     )
     report_path = export_midi_analysis_report(
         analysis_report, base_dir / MIDI_ANALYSIS_REPORT_NAME
@@ -317,6 +336,10 @@ def import_external_midi(
         "base_dir": base_dir,
         "source_midi": source,
         "imported_midi": imported_midi,
+        "sanitized_midi": (
+            Path(metadata["sanitized_path"]) if metadata["sanitized_path"] else None
+        ),
+        "import_repaired": metadata["import_repaired"],
         "selected_parts_midi": selected_parts_midi,
         "clean_midi": clean_midi,
         "piano_arranged_midi": arranged_midi,

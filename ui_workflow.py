@@ -91,4 +91,8 @@ def show_studio_mode(app):
 
 
 def apply_selected_workflow(app):
+    if app.workflow_var.get() == QUICK_PLAY:
+        app.skip_leading_silence_var.set(True)
+    else:
+        app.skip_leading_silence_var.set(False)
     app.workflow_manager.apply(app.workflow_var.get())
