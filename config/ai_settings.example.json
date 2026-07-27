@@ -1,0 +1,8 @@
+{
+  "provider": "disabled",
+  "api_keys": {"openai": "", "gemini": "", "openai_compatible": ""},
+  "models": {"openai": "", "gemini": "", "openai_compatible": ""},
+  "openai_compatible_base_url": "",
+  "timeout_seconds": 60,
+  "max_retries": 2
+}

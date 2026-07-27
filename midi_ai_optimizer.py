@@ -1,8 +1,14 @@
 import json
-import os
 import shutil
 from pathlib import Path
-from urllib import request
+
+from ai_settings import (
+    PROVIDER_DISABLED,
+    get_active_provider_settings,
+    load_ai_settings,
+    validate_ai_settings,
+)
+from ai_providers import create_provider
 
 from midi_rule_engine import (
     RuleNote, normalize_tempo_map, read_midi_notes, seconds_to_ticks,
@@ -33,7 +39,6 @@ DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "window_ms": 50,
     "max_notes_per_window": 2,
     "min_note_duration_ms": 35,
-    "openai_model": "gpt-4.1-mini",
 }
 OPENAI_OPTIMIZER_PROMPT = """You are optimizing MIDI notes for a 37-key music game.
 
@@ -50,6 +55,24 @@ Task:
 - Do not create a new song.
 - Do not change the 37-key note range.
 - Return JSON only."""
+
+
+def _ai_settings_from_options(options=None):
+    options = options or {}
+    return get_active_provider_settings(options.get("ai_settings", load_ai_settings()))
+
+
+def test_ai_connection(settings=None):
+    raw_settings = settings or load_ai_settings()
+    active = get_active_provider_settings(raw_settings)
+    valid, errors = validate_ai_settings(raw_settings)
+    if active.get("provider") == PROVIDER_DISABLED:
+        return False, "AI disabled"
+    if not valid:
+        return False, " ".join(errors) or "Invalid configuration"
+
+    result = create_provider(active).test_connection()
+    return result.success, result.message
 
 
 def midi_notes_to_dicts(input_midi):
@@ -538,79 +561,49 @@ def extract_json_from_response(payload):
     raise ValueError("OpenAI response did not contain text")
 
 
-def optimize_notes_with_openai(notes, options):
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-
+def optimize_notes_with_ai(notes, options):
     options = {**DEFAULT_AI_OPTIMIZER_OPTIONS, **(options or {})}
-    body = {
-        "model": options.get("openai_model") or DEFAULT_AI_OPTIMIZER_OPTIONS["openai_model"],
-        "input": [
-            {
-                "role": "system",
-                "content": "You are a MIDI cleanup assistant. Return valid JSON only.",
-            },
-            {
-                "role": "user",
-                "content": (
-                    OPENAI_OPTIMIZER_PROMPT
-                    + "\n\nNotes JSON:\n"
-                    + json.dumps(notes, separators=(",", ":"))
-                ),
-            },
-        ],
-    }
-
-    request_data = json.dumps(body).encode("utf-8")
-    req = request.Request(
-        "https://api.openai.com/v1/responses",
-        data=request_data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with request.urlopen(req, timeout=60) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-
-    text = extract_json_from_response(payload).strip()
+    settings = _ai_settings_from_options(options)
+    valid, errors = validate_ai_settings(settings)
+    if settings.get("provider") == PROVIDER_DISABLED:
+        raise RuntimeError("AI provider is disabled")
+    if not valid:
+        raise RuntimeError(" ".join(errors) or "Invalid AI configuration")
+    result = create_provider(settings).optimize_midi(OPENAI_OPTIMIZER_PROMPT, notes)
     return validate_note_dicts(
-        json.loads(text), note_map=options.get("note_map") or DEFAULT_NOTE_MAP
+        result["notes"], note_map=options.get("note_map") or DEFAULT_NOTE_MAP
     )
+
+
+# Backward-compatible public name for integrations importing the old helper.
+optimize_notes_with_openai = optimize_notes_with_ai
 
 
 def optimize_chunk(notes, options):
     mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
-    if mode == OPTIMIZER_OPENAI:
-        try:
-            optimized = validate_note_dicts(
-                optimize_notes_with_openai(notes, options),
-                note_map=options.get("note_map") or DEFAULT_NOTE_MAP,
+    if mode in (OPTIMIZER_OPENAI, "ai"):
+        optimized = validate_note_dicts(
+            optimize_notes_with_ai(notes, options),
+            note_map=options.get("note_map") or DEFAULT_NOTE_MAP,
+        )
+        # Reattach source tick identity only when model timing is unchanged.
+        timing_by_ms = {}
+        for source_note in notes:
+            timing_by_ms.setdefault(
+                (source_note["start_ms"], source_note["duration_ms"]), []
+            ).append(source_note)
+        for optimized_note in optimized:
+            if "start_tick" in optimized_note:
+                continue
+            matches = timing_by_ms.get(
+                (optimized_note["start_ms"], optimized_note["duration_ms"]), []
             )
-            # The model-facing schema historically omitted tick metadata. When
-            # start/duration are unchanged, reattach the source tick identity;
-            # a changed start_ms remains an explicit model timing edit.
-            timing_by_ms = {}
-            for source_note in notes:
-                timing_by_ms.setdefault(
-                    (source_note["start_ms"], source_note["duration_ms"]), []
-                ).append(source_note)
-            for optimized_note in optimized:
-                if "start_tick" in optimized_note:
-                    continue
-                matches = timing_by_ms.get(
-                    (optimized_note["start_ms"], optimized_note["duration_ms"]), []
-                )
-                if matches:
-                    source_note = matches.pop(0)
-                    for key in ("start_tick", "end_tick", "ppq", "tempo_map"):
-                        if key in source_note:
-                            optimized_note[key] = source_note[key]
-            return optimized
-        except Exception:
-            return optimize_notes_with_rules(notes, options)
+            if matches:
+                source_note = matches.pop(0)
+                for key in ("start_tick", "end_tick", "ppq", "tempo_map"):
+                    if key in source_note:
+                        optimized_note[key] = source_note[key]
+        return optimized
 
     return optimize_notes_with_rules(notes, options)
 

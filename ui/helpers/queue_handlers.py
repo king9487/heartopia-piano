@@ -1,4 +1,5 @@
 import queue
+import tkinter as tk
 from tkinter import messagebox
 
 
@@ -29,6 +30,9 @@ class UiQueueHandlersMixin:
             "optimize_error": self._handle_optimize_error,
             "rebuild_done": self._handle_rebuild_done,
             "rebuild_error": self._handle_rebuild_error,
+            "ai_test_done": self._handle_ai_test_done,
+            "ai_models_done": self._handle_ai_models_done,
+            "ai_models_error": self._handle_ai_models_error,
         }.get(kind)
         if handler is not None:
             handler(payload)
@@ -145,7 +149,11 @@ class UiQueueHandlersMixin:
 
     def _handle_optimize_error(self, payload):
         self.set_status("MIDI optimization failed")
-        messagebox.showerror("MIDI optimization failed", payload)
+        if isinstance(payload, dict) and payload.get("provider_status") == "invalid_response" and payload.get("details"):
+            self.log_message(payload["message"] + " " + payload["details"])
+            self._show_ai_json_error(payload)
+        else:
+            messagebox.showerror("MIDI optimization failed", payload.get("message", "Optimization failed") if isinstance(payload, dict) else payload)
 
     def _handle_rebuild_done(self, payload):
         if self.results:
@@ -165,4 +173,55 @@ class UiQueueHandlersMixin:
 
     def _handle_rebuild_error(self, payload):
         self.set_status("MIDI rebuild failed")
-        messagebox.showerror("MIDI rebuild failed", payload)
+        if isinstance(payload, dict) and payload.get("provider_status") == "invalid_response" and payload.get("details"):
+            self.log_message(payload["message"] + " " + payload["details"])
+            self._show_ai_json_error(payload)
+        else:
+            messagebox.showerror("MIDI rebuild failed", payload.get("message", "Rebuild failed") if isinstance(payload, dict) else payload)
+
+    def _show_ai_json_error(self, payload):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Gemini Response Diagnostics")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        ttk_frame = tk.Frame(dialog, padx=16, pady=16)
+        ttk_frame.pack(fill="both", expand=True)
+        tk.Label(ttk_frame, text=payload.get("message", "Gemini response validation failed."), anchor="w").pack(fill="x")
+        buttons = tk.Frame(ttk_frame)
+        buttons.pack(fill="x", pady=(14, 0))
+
+        def show_details():
+            details_window = tk.Toplevel(dialog)
+            details_window.title("Gemini Response Details")
+            text = tk.Text(details_window, width=90, height=24, wrap="word")
+            text.pack(fill="both", expand=True, padx=10, pady=10)
+            text.insert("1.0", payload.get("details", "No details available."))
+            text.configure(state="disabled")
+            tk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=(0, 10))
+
+        tk.Button(buttons, text="View Details...", command=show_details).pack(side="left")
+        tk.Button(buttons, text="Close", command=dialog.destroy).pack(side="right")
+
+    def _handle_ai_test_done(self, payload):
+        message = payload.get("message") or "Connection failed"
+        self.ai_status_var.set(payload.get("status") or message)
+        if payload.get("ok"):
+            self.log_message("AI connection test successful.")
+        else:
+            self.log_message(f"AI connection test failed: {message}")
+
+    def _handle_ai_models_done(self, payload):
+        from ai_models import model_values_for_provider
+        if self.ai_provider_var.get().replace("-", "_") != payload["provider"]:
+            return
+        values = model_values_for_provider(payload["provider"], payload["models"])
+        self.ai_model_combo.configure(values=values)
+        self.ai_status_var.set(f"Loaded {len(payload['models'])} models")
+
+    def _handle_ai_models_error(self, payload):
+        message = payload.get("message") or "Model retrieval failed"
+        self.ai_status_var.set(message)
+        messagebox.showwarning(
+            "Refresh Models",
+            message + "\nUsing the built-in model list.",
+        )

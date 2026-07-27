@@ -8,3 +8,5 @@ __pycache__/
 *_AUDIT_REPORT.md
 *_REPORT.md
 analysis_report.json
+config/ai_settings.json
+logs/

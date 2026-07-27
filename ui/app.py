@@ -96,6 +96,17 @@ class YoutubeMidiApp(
     target_key_var: Any
     detected_key_var: Any
     key_transpose_status_var: Any
+    ai_provider_var: Any
+    ai_api_key_var: Any
+    ai_model_var: Any
+    ai_base_url_var: Any
+    ai_timeout_var: Any
+    ai_max_retries_var: Any
+    ai_show_key_var: Any
+    ai_status_var: Any
+    ai_provider_status_var: Any
+    ai_model_status_var: Any
+    ai_key_status_var: Any
     range_start_var: Any
     range_end_var: Any
     status_var: Any
@@ -130,6 +141,7 @@ class YoutubeMidiApp(
     cleanup_tab: ttk.Frame | None
     studio_tab: ttk.Frame | None
     analysis_tab: ttk.Frame | None
+    ai_settings_tab: ttk.Frame | None
     log: tk.Text | None
     convert_button: ttk.Button | None
     local_audio_button: ttk.Button | None

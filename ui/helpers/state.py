@@ -7,6 +7,7 @@ from keyboard_profiles import DEFAULT_KEYBOARD_PROFILE
 from keyboard_mapping import DEFAULT_MAPPING_PROFILE, load_mapping_profiles
 from tools import default_demucs_device
 from converter import DEFAULT_SEPARATION_MODE, DEFAULT_SEPARATION_STEM
+from ai_settings import load_ai_settings
 
 
 def initialize_app_state(app):
@@ -81,6 +82,22 @@ def initialize_app_state(app):
     app.target_key_var = tk.StringVar(value="Original")
     app.detected_key_var = tk.StringVar(value="Detected Key: --")
     app.key_transpose_status_var = tk.StringVar(value="Transpose: 0 semitones")
+    ai_settings = load_ai_settings()
+    app.ai_provider_var = tk.StringVar(value=ai_settings["provider"])
+    app.ai_draft_api_keys = dict(ai_settings["api_keys"])
+    app.ai_draft_models = dict(ai_settings["models"])
+    active_provider = ai_settings["provider"]
+    app.ai_previous_provider = active_provider
+    app.ai_api_key_var = tk.StringVar(value=app.ai_draft_api_keys.get(active_provider, ""))
+    app.ai_model_var = tk.StringVar(value=app.ai_draft_models.get(active_provider, ""))
+    app.ai_base_url_var = tk.StringVar(value=ai_settings["openai_compatible_base_url"])
+    app.ai_timeout_var = tk.IntVar(value=ai_settings["timeout_seconds"])
+    app.ai_max_retries_var = tk.IntVar(value=ai_settings["max_retries"])
+    app.ai_show_key_var = tk.BooleanVar(value=False)
+    app.ai_status_var = tk.StringVar(value="AI disabled")
+    app.ai_provider_status_var = tk.StringVar(value="AI Provider: Disabled")
+    app.ai_model_status_var = tk.StringVar(value="AI Model: not configured")
+    app.ai_key_status_var = tk.StringVar(value="API Key: Missing")
     app.range_start_var = tk.DoubleVar(value=0.0)
     app.range_end_var = tk.DoubleVar(value=30.0)
     app.status_var = tk.StringVar(value="Ready")
@@ -121,6 +138,7 @@ def initialize_app_state(app):
     app.cleanup_tab = None
     app.studio_tab = None
     app.analysis_tab = None
+    app.ai_settings_tab = None
     app.keyboard_mapping_tab = None
     app.log = None
     app.convert_button = None
@@ -169,4 +187,5 @@ def initialize_app_state(app):
     app.playback_sources_frame = None
     app.playback_compare_frame = None
     app.playback_advanced_settings = ()
+    app.ai_api_key_entry = None
     app.workflow_manager = None

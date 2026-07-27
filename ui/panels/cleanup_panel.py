@@ -86,7 +86,7 @@ def build_cleanup_panel(app, parent, start_row=0):
     ttk.Combobox(
         ai_optimizer,
         textvariable=app.optimizer_mode_var,
-        values=("None", "Rule", "OpenAI"),
+        values=("None", "Rule", "AI"),
         state="readonly",
         width=12,
     ).grid(row=0, column=1, sticky="w", padx=(8, 24))

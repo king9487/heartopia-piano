@@ -53,13 +53,14 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 也可雙擊 `start_ui.bat`。`start_cli.bat` 是 CLI 入口；本指南聚焦桌面 UI。
 
-若要使用 **Experimental — OpenAI Optimizer**，啟動前設定：
+AI Optimizer is optional. Rule mode is the default and works without any API key.
+To use OpenAI or an OpenAI-compatible endpoint, open the desktop app's
+`AI Settings` tab and save a local configuration.
 
-```powershell
-$env:OPENAI_API_KEY="你的 API key"
-```
-
-這個模式會把每個音符的時間、長度、音高與 velocity 送到 OpenAI API；API 不可用、回傳無效或未設定 key 時，程式會自動改用本機 Rule optimizer。
+Local AI settings are stored in `config/ai_settings.json` during development.
+That runtime file is ignored by Git. The tracked template is
+`config/ai_settings.example.json`; copy it manually only if you want to seed a
+local settings file. Never commit or share your API key.
 
 ## 第一次使用
 
@@ -304,10 +305,41 @@ Cleanup 的 `Melody only` 與 `Arrangement style = melody_only` 是不同階段�
 | Dropdown 值 | 實際行為 |
 |---|---|
 | `Rule` | 使用本機規則依 duration、velocity、音程連續性與每窗上限挑選音符 |
-| `OpenAI` | **Experimental**。以 8 秒 chunk 呼叫 OpenAI Responses API；任何錯誤會無提示地回退至 Rule |
+| `OpenAI` | 使用 AI Settings 目前選取的 OpenAI、Gemini 或 OpenAI-compatible provider；錯誤會明確顯示，不會靜默回退 Rule |
 | `None` | 不呼叫 OpenAI。依目前實作，pipeline 仍會經過本機 rules 並產生 `ai_optimized_37key.mid`，不是完全 bypass；external MIDI 要真正原樣傳遞此階段請用 `Skip AI Optimizer` |
 
 `Optimize MIDI` 從目前可用的 Clean/Raw 來源執行 Arranger、Optimizer、Pitch Correction 與 Final。若同時選 `original + None`，按鈕會提示需改用 Rule/OpenAI 或簡化編曲風格。
+
+### AI Settings
+
+AI 為選用功能，預設為 `Disabled`；`Rule` 模式完全在本機執行，不需要 API Key。
+AI 模式可選 OpenAI、Gemini 或 OpenAI-compatible endpoint，切換 provider 後不必重新啟動程式。
+
+`AI Settings` 分頁提供以下設定：
+
+| 欄位 | 說明 |
+|---|---|
+| `Provider` | `Disabled`、`OpenAI`、`Gemini` 或 `OpenAI-compatible` |
+| `API Key` | 各 provider 分開保存，輸入框預設遮蔽 |
+| `Model` | 各 provider 使用自己設定的 model 名稱，不在 optimizer 內寫死 |
+| `Base URL` | 僅 OpenAI-compatible 需要；必要時自動補上 `/v1/responses` |
+| `Timeout seconds` | 單次 request 的逾時秒數 |
+| `Max retries` | 暫時性失敗的重試次數 |
+
+Model 下拉選單會隨 provider 切換：OpenAI 預設為 `gpt-4.1-mini`，Gemini 預設為
+`gemini-3-flash-preview`，OpenAI-compatible 則保留空白可編輯欄位。各 provider 的 model
+會分開保存，不會在切換時互相覆寫。`Refresh Models` 可向 OpenAI 或 Gemini 取得目前可用
+的 model；Gemini 清單只顯示支援 `generateContent` 的項目。取得失敗時仍保留內建清單。
+
+按 `Test Connection` 會送出最小實際 request 驗證遠端服務；按
+`Clear Current Provider Key` 只清除目前 provider 的 key。開發模式的本機設定位於
+`config/ai_settings.json`；PyInstaller 版本會優先使用執行檔旁可寫的 `config`，否則使用者設定目錄。
+`config/ai_settings.json` 已由 Git 忽略，請勿把 API Key 放進原始碼、README、測試 fixture
+或 `config/ai_settings.example.json`。
+
+呼叫雲端 AI 可能產生費用或消耗 quota；不同 provider/model 可能得到不同優化結果，專案不宣稱
+其中任何一個較準確。模型回傳值仍會經過既有 MIDI 範圍與欄位驗證，驗證成功後才寫入 MIDI。
+若 provider 停用、缺少 key 或 request/response 無效，程式會明確顯示錯誤；需要改用 Rule 時請由使用者明確選擇，不會靜默回退。
 
 ### Pitch Correction
 
@@ -501,7 +533,7 @@ Analysis 沒有按鈕、dropdown 或 checkbox。切換 Current MIDI 時，程式
 | 只保留主旋律 | 優先試 `Arrangement style = melody_only`；若仍太密，再開 Cleanup `Melody only` |
 | 簡化鋼琴 cover | `Piano Cover` preset，Melody notes `2–3`，window `50–100 ms` |
 | 精準挑聲部 | 在 Import 分開設定 `Use Direct` 與 `Use Optimization`，以 Track+Channel 而非整 Track 判斷 |
-| 測 OpenAI | **Experimental**；先保存 Rule 版本、確認 API 費用與資料傳送，再用 A/B 比較；失敗會回退 Rule |
+| 測 AI | 先保存 Rule 版本、確認 API 費用與資料傳送，再用 A/B 比較；失敗會顯示錯誤，由使用者決定是否改用 Rule |
 | 建立片段 | Studio 定好 Start/End，Export Range，再把 `chorus_37key.mid` 設為 Current |
 | 保留演奏事件 | Direct Play `Full Imported MIDI`；避免把需要 sustain、program 或多 channel identity 的需求交給 note-only processing stages |
 
@@ -537,7 +569,7 @@ pipeline 固定建立各階段檔案，而且目前 `None` 仍走本機 rules。
 
 ### OpenAI 失敗時會怎樣？
 
-**Experimental OpenAI Optimizer** 會自動回退到 Rule，因此 conversion 仍可能成功，但 UI 不會為每個 chunk 顯示回退原因。
+如果 AI mode 被選取但 provider disabled、API key 缺少或設定無效，UI 會提示並引導到 `AI Settings`，不會送出 request。API request 失敗或回傳無效時會停止寫入該次 AI 輸出並顯示錯誤；要改用本機 Rule 必須由使用者明確選擇。
 
 ### 為什麼 `Existing no_vocals` 失敗？
 

@@ -477,7 +477,9 @@ class UiConvertActionsMixin:
             return
         try:
             options = self.get_processing_options()
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            if str(exc) == "AI API key is not configured":
+                return
             messagebox.showerror("Invalid setting", "Processing settings must be numbers.")
             return
         skips = {
