@@ -12,7 +12,11 @@ from keyboard_mapping import (
     load_mapping_profiles,
     save_mapping_profile,
 )
-from midi_to_keyboard import build_keyboard_schedule
+from midi_to_keyboard import (
+    OCTAVE_FIT_OCTAVE_SHIFT,
+    build_keyboard_schedule,
+    build_original_keyboard_schedule,
+)
 
 
 def write_test_midi(path, notes=(60,), ticks=120):
@@ -97,6 +101,49 @@ class KeyboardMappingTests(unittest.TestCase):
                 [("down", 60, "q"), ("up", 60, "q")],
             )
             self.assertEqual(logs, ["Skipped unmapped note: C#4"])
+
+    def test_sparse_mapping_defines_range_for_octave_compression(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "song.mid"
+            write_test_midi(source, notes=(48, 59, 60, 72, 83))
+            profile = MappingProfile(
+                "C4 to C5",
+                {
+                    **{note: "" for note in range(48, 84)},
+                    **{note: f"key-{note}" for note in range(60, 73)},
+                },
+            )
+
+            schedule = build_keyboard_schedule(
+                source,
+                mapping_profile=profile,
+                octave_fit_mode=OCTAVE_FIT_OCTAVE_SHIFT,
+            )
+
+            self.assertEqual(
+                [event[2] for event in schedule if event[1] == "down"],
+                [60, 71, 60, 72, 71],
+            )
+
+    def test_original_playback_uses_assigned_range_for_octave_compression(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "song.mid"
+            write_test_midi(source, notes=(48, 83))
+            profile = MappingProfile(
+                "C4 to C5",
+                {note: f"key-{note}" for note in range(60, 73)},
+            )
+
+            schedule = build_original_keyboard_schedule(
+                source,
+                mapping_profile=profile,
+                out_of_range_mode="octave_shift",
+            )
+
+            self.assertEqual(
+                [event[2] for event in schedule if event[1] == "down"],
+                [60, 71],
+            )
 
 
 if __name__ == "__main__":

@@ -43,12 +43,23 @@ def is_note_off(message):
 
 def _resolve_playback_maps(note_map=None, mapping_profile=None, keyboard_map=None):
     if mapping_profile is not None:
-        note_map = dict(mapping_profile.mappings)
         keyboard_map = mapping_profile.keyboard_map
+        # Empty mapping rows are editable placeholders, not playable notes.
+        # Derive the fitting range from keys that are actually assigned so a
+        # sparse/custom profile automatically controls MIDI range compression.
+        note_map = dict(keyboard_map)
     if note_map is None:
         note_map = DEFAULT_NOTE_MAP
     if keyboard_map is None:
         keyboard_map = note_map
+    else:
+        # A separately supplied keyboard map can also be sparse.  Never fit a
+        # note to a row that cannot produce a keyboard key.
+        note_map = {
+            note: note_map[note]
+            for note in note_map
+            if str(keyboard_map.get(note, "")).strip()
+        }
     return note_map, keyboard_map
 
 
@@ -691,6 +702,20 @@ def build_clean_note_events(
             velocity_threshold=velocity_threshold,
         )
         if note is None:
+            # Preserve the useful warning for an explicitly present but empty
+            # mapping row.  Such rows no longer expand the playable range.
+            if (
+                mapping_profile is not None
+                and raw_note in mapping_profile.mappings
+                and not str(mapping_profile.mappings[raw_note]).strip()
+                and raw_note not in skipped_notes
+            ):
+                skipped_notes.add(raw_note)
+                message = f"Skipped unmapped note: {midi_note_name(raw_note)}"
+                if log_callback is not None:
+                    log_callback(message)
+                else:
+                    print(message)
             continue
         key = get_key_for_note(mapping_profile, note) if mapping_profile is not None else keyboard_map.get(note)
         if not key:
