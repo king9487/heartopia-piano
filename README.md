@@ -72,7 +72,7 @@ local settings file. Never commit or share your API key.
 4. 到 `Optimization` 選 `Balanced`。
 5. 回到 `Import` 按 `Process Imported MIDI`。
 6. 到 `Playback` 的 `MIDI source` 選 `Final MIDI`，再回 `Main` 按 `Play to Game`。
-7. 倒數期間切回遊戲並把焦點放在鋼琴視窗；播放中按 `F8` 可停止。
+7. 倒數期間切回遊戲並把焦點放在鋼琴視窗；播放中按 `F6` 可暫停／繼續，按 `F8` 可停止。
 
 若來源是 YouTube 或音訊，使用 `Demucs vocals only`、`no_vocals`、`Balanced` 作為起點即可。
 
@@ -391,7 +391,7 @@ Imported/Selected Parts 在 A/B playback 會走 original-event 模式，因此�
 | 類型 | 設定 | 範圍／預設 | 說明 |
 |---|---|---|---|
 | Checkbox | `Always on top` | On | 讓 UI 視窗保持最上層；立即生效 |
-| Spinbox | `Speed` | 0.25–3.0 / `1.0` | game playback 倍速；不改檔案 |
+| Spinbox / `−` `+` | `Speed` | 0.25–3.0 / `1.0` | game playback 倍速，可在播放中以數字鍵盤 `−` / `+` 即時調整；`Ctrl+-` / `Ctrl++` 為備用；不改檔案 |
 | Spinbox | `Focus delay` | 1–10 秒 / `3` | 送出第一鍵前的倒數時間 |
 | Spinbox | `Transpose` | -36–36 / `0` | game playback 即時半音位移；不寫 MIDI |
 | Spinbox | `Chord gap ms` | 0–80 / `18` | 把同時音符錯開送出，降低遊戲漏和弦機率 |
@@ -404,7 +404,7 @@ Imported/Selected Parts 在 A/B playback 會走 original-event 模式，因此�
 | `Standard 37-Key` | `C2–C5`，MIDI 36–72，37 鍵 | 一般 37-key layout |
 | `Full Piano` | `A0–C8`，MIDI 21–108，88 鍵 | 分析／處理完整鋼琴範圍；不代表 Heartopia 可播放全部音符 |
 
-`F8` 是全域停止 hotkey。game playback 使用 `keyboard` 套件送出電腦鍵盤事件，與 Studio 的 MIDI output playback 是兩套不同機制。
+`F6` 是全域暫停／繼續 hotkey，`F8` 是全域停止 hotkey。game playback 使用 `keyboard` 套件送出電腦鍵盤事件，與 Studio 的 MIDI output playback 是兩套不同機制。
 
 ## Studio 分頁
 

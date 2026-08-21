@@ -24,14 +24,22 @@ def build_settings_panel(app, parent, start_row=0):
     )
     skip_silence.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
     ttk.Label(panel, text="Speed").grid(row=2, column=0, sticky="w", pady=(10, 0))
+    speed_controls = ttk.Frame(panel)
+    speed_controls.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+    ttk.Button(
+        speed_controls, text="−", width=3, command=lambda: app.adjust_playback_speed(-0.25)
+    ).grid(row=0, column=0)
     ttk.Spinbox(
-        panel,
+        speed_controls,
         from_=0.25,
         to=3.0,
         increment=0.25,
         textvariable=app.speed_var,
         width=8,
-    ).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+    ).grid(row=0, column=1, padx=4)
+    ttk.Button(
+        speed_controls, text="+", width=3, command=lambda: app.adjust_playback_speed(0.25)
+    ).grid(row=0, column=2)
     focus_label = ttk.Label(panel, text="Focus delay")
     focus_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
     focus_input = ttk.Spinbox(

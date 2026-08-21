@@ -44,7 +44,11 @@ class YoutubeMidiApp(
     convert_cancel_token: Any
     playing: bool
     stop_event: Any
+    pause_event: Any
     stop_hotkey: Any
+    pause_hotkey: Any
+    speed_hotkeys: list
+    playback_speed: float
 
     url_var: Any
     input_source_var: Any
@@ -180,6 +184,7 @@ class YoutubeMidiApp(
 
         self.build_ui()
         self.refresh_converted_outputs()
+        self.root.bind("<F6>", self.toggle_keyboard_playback_pause)
         self.root.bind("<F8>", self.stop_keyboard_playback)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.poll_queue()
@@ -192,6 +197,7 @@ class YoutubeMidiApp(
 
     def on_close(self):
         self.stop_event.set()
+        self.pause_event.clear()
         self.unregister_stop_hotkey()
         self.stop_studio_midi()
         if self.selected_direct_temp_dir is not None:

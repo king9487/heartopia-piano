@@ -18,7 +18,11 @@ def initialize_app_state(app):
     app.convert_cancel_token = None
     app.playing = False
     app.stop_event = threading.Event()
+    app.pause_event = threading.Event()
     app.stop_hotkey = None
+    app.pause_hotkey = None
+    app.speed_hotkeys = []
+    app.playback_speed = 1.0
 
     app.url_var = tk.StringVar()
     app.workflow_var = tk.StringVar(value="studio_mode")

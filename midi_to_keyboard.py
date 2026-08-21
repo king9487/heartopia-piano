@@ -903,6 +903,40 @@ def build_keyboard_schedule(
     return schedule
 
 
+class _PlaybackClock:
+    """Track schedule time while allowing pause and live speed changes."""
+
+    def __init__(self, speed_provider=None):
+        self.speed_provider = speed_provider or (lambda: 1.0)
+        self.position = 0.0
+        self.last_tick = time.perf_counter()
+
+    def wait_until(self, target, stop_event=None, pause_event=None, on_pause=None):
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                return False
+
+            now = time.perf_counter()
+            speed = max(0.01, float(self.speed_provider()))
+            self.position += (now - self.last_tick) * speed
+            self.last_tick = now
+
+            if pause_event is not None and pause_event.is_set():
+                if on_pause is not None:
+                    on_pause()
+                while pause_event.is_set():
+                    if stop_event is not None and stop_event.is_set():
+                        return False
+                    time.sleep(0.05)
+                self.last_tick = time.perf_counter()
+                continue
+
+            remaining = target - self.position
+            if remaining <= 0:
+                return True
+            time.sleep(min(remaining / speed, 0.05))
+
+
 def play_midi_as_keyboard(
     midi_path,
     note_map=None,
@@ -911,6 +945,8 @@ def play_midi_as_keyboard(
     log_callback=None,
     speed=1.0,
     stop_event=None,
+    pause_event=None,
+    speed_provider=None,
     chord_delay=0.018,
     min_hold=0.075,
     transpose=0,
@@ -932,14 +968,13 @@ def play_midi_as_keyboard(
         raise ValueError("speed must be greater than 0")
 
     active_keys = set()
-    started_at = time.perf_counter()
     schedule = build_keyboard_schedule(
         midi_path,
         note_map=note_map,
         mapping_profile=mapping_profile,
         keyboard_map=keyboard_map,
         log_callback=log_callback,
-        speed=speed,
+        speed=1.0 if speed_provider is not None else speed,
         chord_delay=chord_delay,
         min_hold=min_hold,
         transpose=transpose,
@@ -958,18 +993,22 @@ def play_midi_as_keyboard(
         skip_leading_silence=skip_leading_silence,
     )
 
+    clock = _PlaybackClock(speed_provider)
+
+    def release_active_keys():
+        for active_key in active_keys:
+            keyboard.release(active_key)
+        active_keys.clear()
+
     try:
         for timestamp, action, note, key in schedule:
-            if stop_event is not None and stop_event.is_set():
+            if not clock.wait_until(
+                timestamp,
+                stop_event=stop_event,
+                pause_event=pause_event,
+                on_pause=release_active_keys,
+            ):
                 break
-
-            target_time = started_at + timestamp
-            delay = target_time - time.perf_counter()
-            while delay > 0:
-                if stop_event is not None and stop_event.is_set():
-                    return
-                time.sleep(min(delay, 0.05))
-                delay = target_time - time.perf_counter()
 
             if action == "down":
                 keyboard.press(key)
@@ -978,8 +1017,7 @@ def play_midi_as_keyboard(
                 keyboard.release(key)
                 active_keys.discard(key)
     finally:
-        for key in active_keys:
-            keyboard.release(key)
+        release_active_keys()
 
 
 def play_original_midi_as_keyboard(
@@ -990,6 +1028,8 @@ def play_original_midi_as_keyboard(
     log_callback=None,
     speed=1.0,
     stop_event=None,
+    pause_event=None,
+    speed_provider=None,
     start_sec=None,
     end_sec=None,
     part_filter=None,
@@ -999,24 +1039,29 @@ def play_original_midi_as_keyboard(
     """Play source note_on/note_off messages with no RuleNote cleanup path."""
     schedule = build_original_keyboard_schedule(
         midi_path, note_map=note_map, mapping_profile=mapping_profile,
-        keyboard_map=keyboard_map, log_callback=log_callback, speed=speed,
+        keyboard_map=keyboard_map, log_callback=log_callback,
+        speed=1.0 if speed_provider is not None else speed,
         start_sec=start_sec, end_sec=end_sec,
         part_filter=part_filter, out_of_range_mode=out_of_range_mode,
         skip_leading_silence=skip_leading_silence,
     )
     active_counts = {}
-    started_at = time.perf_counter()
+    clock = _PlaybackClock(speed_provider)
+
+    def release_active_keys():
+        for active_key in active_counts:
+            keyboard.release(active_key)
+        active_counts.clear()
+
     try:
         for timestamp, action, _note, key in schedule:
-            if stop_event is not None and stop_event.is_set():
+            if not clock.wait_until(
+                timestamp,
+                stop_event=stop_event,
+                pause_event=pause_event,
+                on_pause=release_active_keys,
+            ):
                 break
-            target_time = started_at + timestamp
-            delay = target_time - time.perf_counter()
-            while delay > 0:
-                if stop_event is not None and stop_event.is_set():
-                    return
-                time.sleep(min(delay, 0.05))
-                delay = target_time - time.perf_counter()
 
             count = active_counts.get(key, 0)
             if action == "down":
@@ -1030,5 +1075,4 @@ def play_original_midi_as_keyboard(
                 else:
                     active_counts[key] = count - 1
     finally:
-        for key in active_counts:
-            keyboard.release(key)
+        release_active_keys()

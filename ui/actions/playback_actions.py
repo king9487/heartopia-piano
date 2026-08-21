@@ -10,6 +10,9 @@ from midi_to_keyboard import (
     play_original_midi_as_keyboard,
 )
 
+NUMPAD_PLUS_SCAN_CODE = 78
+NUMPAD_MINUS_SCAN_CODE = 74
+
 
 class UiPlaybackActionsMixin:
     """Preview and game-keyboard playback actions."""
@@ -120,7 +123,9 @@ class UiPlaybackActionsMixin:
         skip_leading_silence = bool(self.skip_leading_silence_var.get())
 
         self.playing = True
+        self.playback_speed = speed
         self.stop_event.clear()
+        self.pause_event.clear()
         self.register_stop_hotkey()
         assert self.play_button is not None
         self.play_button.configure(state="disabled")
@@ -132,7 +137,8 @@ class UiPlaybackActionsMixin:
         else:
             playback_label = f"Range playback ({start_sec:g}s to {end_sec:g}s)"
         self.log_message(
-            f"{playback_label} will start in {countdown} seconds. Press F8 to stop."
+            f"{playback_label} will start in {countdown} seconds. "
+            "Press F6 to pause/resume, numpad +/- to change speed, or F8 to stop."
         )
         self.log_message(f"Mapping profile: {mapping_profile.name}")
         self.root.withdraw()
@@ -186,6 +192,8 @@ class UiPlaybackActionsMixin:
                     log_callback=log_callback,
                     speed=speed,
                     stop_event=self.stop_event,
+                    pause_event=self.pause_event,
+                    speed_provider=lambda: self.playback_speed,
                     start_sec=start_sec,
                     end_sec=end_sec,
                     part_filter=original_part_filter,
@@ -199,6 +207,8 @@ class UiPlaybackActionsMixin:
                     log_callback=log_callback,
                     speed=speed,
                     stop_event=self.stop_event,
+                    pause_event=self.pause_event,
+                    speed_provider=lambda: self.playback_speed,
                     chord_delay=chord_delay,
                     min_hold=min_hold,
                     start_sec=start_sec,
@@ -213,8 +223,32 @@ class UiPlaybackActionsMixin:
     def stop_keyboard_playback(self, event=None):
         if self.playing:
             self.stop_event.set()
+            self.pause_event.clear()
             self.status_var.set("Stopping keyboard playback")
             self.log_message("Stop requested.")
+
+    def toggle_keyboard_playback_pause(self, event=None):
+        if not self.playing:
+            return
+        if self.pause_event.is_set():
+            self.pause_event.clear()
+            self.status_var.set("Keyboard playback resumed")
+            self.log_message("Playback resumed (F6).")
+        else:
+            self.pause_event.set()
+            self.status_var.set("Keyboard playback paused")
+            self.log_message("Playback paused (F6).")
+
+    def adjust_playback_speed(self, delta):
+        try:
+            current = self.playback_speed if self.playing else float(self.speed_var.get())
+        except (TypeError, ValueError):
+            current = 1.0
+        speed = min(3.0, max(0.25, round((current + delta) * 4) / 4))
+        self.playback_speed = speed
+        self.speed_var.set(speed)
+        self.status_var.set(f"Keyboard playback speed: {speed:g}x")
+        self.log_message(f"Playback speed changed to {speed:g}x.")
 
     def stop_current_task(self):
         if self.converting and self.convert_cancel_token:
@@ -228,8 +262,25 @@ class UiPlaybackActionsMixin:
     def register_stop_hotkey(self):
         self.unregister_stop_hotkey()
         self.stop_hotkey = keyboard.add_hotkey("f8", self.stop_keyboard_playback)
+        self.pause_hotkey = keyboard.add_hotkey("f6", self.toggle_keyboard_playback_pause)
+        self.speed_hotkeys = [
+            keyboard.add_hotkey(
+                NUMPAD_PLUS_SCAN_CODE, lambda: self.adjust_playback_speed(0.25)
+            ),
+            keyboard.add_hotkey(
+                NUMPAD_MINUS_SCAN_CODE, lambda: self.adjust_playback_speed(-0.25)
+            ),
+            keyboard.add_hotkey("ctrl+shift+=", lambda: self.adjust_playback_speed(0.25)),
+            keyboard.add_hotkey("ctrl+-", lambda: self.adjust_playback_speed(-0.25)),
+        ]
 
     def unregister_stop_hotkey(self):
         if self.stop_hotkey is not None:
             keyboard.remove_hotkey(self.stop_hotkey)
             self.stop_hotkey = None
+        if self.pause_hotkey is not None:
+            keyboard.remove_hotkey(self.pause_hotkey)
+            self.pause_hotkey = None
+        for hotkey in self.speed_hotkeys:
+            keyboard.remove_hotkey(hotkey)
+        self.speed_hotkeys = []
