@@ -73,12 +73,13 @@ KEEP/REMOVE rules:
 - Preserve the chronological order of retained notes.
 
 Output:
-- Return only a valid JSON array of note events.
-- Never return a single note object.
-- Each item must contain exactly: start_ms, duration_ms, note, velocity.
+- Return exactly one valid JSON object containing notes, removed_notes, and explanation.
+- notes must contain the complete retained note collection.
+- removed_notes must contain exact copies of every removed input note.
+- Each note item must contain exactly: start_ms, duration_ms, note, velocity.
 - Do not include markdown.
 - Do not include code fences.
-- Do not include explanations or any other text."""
+- Do not include text outside the JSON object."""
 
 
 def build_optimizer_prompt(allowed_notes):
@@ -623,7 +624,7 @@ def optimize_notes_with_ai(notes, options):
     else:
         constraints = get_playable_note_constraints(options.get("note_map") or ())
     result = create_provider(settings).optimize_midi(
-        build_optimizer_prompt(constraints), notes
+        build_optimizer_prompt(constraints["allowed_notes"]), notes
     )
     optimized = validate_note_dicts(
         result["notes"], note_map=options.get("note_map") or DEFAULT_NOTE_MAP
