@@ -1,4 +1,5 @@
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -37,12 +38,14 @@ ARRANGEMENT_PIANO_COVER = "piano_cover"
 DEFAULT_DECISION_WINDOW_MS = 8000
 DEFAULT_CONTEXT_BEFORE_MS = 2000
 DEFAULT_CONTEXT_AFTER_MS = 2000
+DEFAULT_MAX_AI_REMOVAL_RATIO = 0.15
 DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "mode": OPTIMIZER_RULE,
     "arrangement_style": ARRANGEMENT_PIANO_COVER,
     "chunk_ms": DEFAULT_DECISION_WINDOW_MS,
     "context_before_ms": DEFAULT_CONTEXT_BEFORE_MS,
     "context_after_ms": DEFAULT_CONTEXT_AFTER_MS,
+    "max_ai_removal_ratio": DEFAULT_MAX_AI_REMOVAL_RATIO,
     "window_ms": 50,
     "max_notes_per_window": 2,
     "min_note_duration_ms": 35,
@@ -60,14 +63,23 @@ Each note event contains exactly:
 - decision
 
 Task:
-- Remove noisy, accidental, duplicate, or unstable notes.
-- Preserve the recognizable main melody.
-- Preserve simple harmony only when it helps the melody.
-- Prefer smooth melodic movement.
-- Avoid excessive simultaneous notes.
-- Avoid sudden pitch jumps unless musically necessary.
-- Prefer melody over accompaniment when they conflict.
-- Do not create or rewrite the song.
+- Perform conservative cleanup of the MIDI.
+- Preserve the original musical arrangement as much as possible.
+- Preserve the recognizable melody.
+- Preserve accompaniment, bass notes, chords, and useful harmony.
+- Remove a note only when there is strong evidence that it is a transcription artifact, accidental noise, duplicate artifact, or clearly unstable false detection.
+- The default decision is KEEP.
+- When uncertain whether a note is intentional, KEEP it.
+- Do not simplify the song merely to reduce note density.
+- Do not remove accompaniment simply because the melody is more prominent.
+- Repeated notes of the same pitch may be intentional and should normally be kept.
+- Chords and simultaneous notes may be intentional and should normally be kept.
+- Sudden pitch jumps may be musically intentional and should only be removed when there is strong evidence they are transcription errors.
+
+IMPORTANT:
+The default decision is KEEP.
+Removal requires high confidence.
+When uncertain, keep the note.
 
 KEEP/REMOVE rules:
 - This optimizer is KEEP/REMOVE only.
@@ -113,8 +125,7 @@ def build_optimizer_prompt(allowed_notes):
         + json.dumps(constraints["allowed_notes"])
         + ".\n"
         + "- Only notes present in the current Keyboard Mapping are playable.\n"
-        + "- Remove any input note whose MIDI note number is not present "
-        + "in the current Keyboard Mapping.\n"
+        + "- Unplayable notes are filtered deterministically before this request.\n"
         + "- Do not assume a fixed 37-key range.\n"
         + "- Treat the current Keyboard Mapping as the authoritative "
         + "playable-note configuration."
@@ -740,7 +751,9 @@ def optimize_notes_with_ai(notes, options):
     provider = create_provider(settings)
     prompt = build_optimizer_prompt(constraints["allowed_notes"])
     progress_callback = options.get("progress_callback")
+    max_ai_removal_ratio = min(1.0, max(0.0, float(options["max_ai_removal_ratio"])))
     gemini_removed_ids = []
+    rejected_ai_removal_count = 0
     chunk_summaries = []
     for chunk_index, window in enumerate(windows, start=1):
         if callable(progress_callback):
@@ -754,7 +767,7 @@ def optimize_notes_with_ai(notes, options):
             item["decision"] = note_id in decision_ids
             payload.append(item)
         context_only_count = sum(not item["decision"] for item in payload)
-        print(f"Chunk {chunk_index}/{len(windows)}")
+        print(f"Chunk: {chunk_index}/{len(windows)}")
         print(
             "Decision window: "
             f"{window['decision_start_ms']}-{window['decision_end_ms']} ms"
@@ -766,15 +779,44 @@ def optimize_notes_with_ai(notes, options):
         print(f"Decision note count: {len(decision_ids)}")
         print(f"Context-only note count: {context_only_count}")
         print(f"Total notes sent: {len(payload)}")
-        removed_ids = []
+        requested_removed_ids = []
         if decision_ids:
             result = provider.optimize_midi(prompt, payload)
-            removed_ids, _explanation = normalize_removal_result(
+            requested_removed_ids, _explanation = normalize_removal_result(
                 result, decision_ids
             )
-        print(f"Gemini removed IDs: {removed_ids}")
-        gemini_removed_ids.extend(removed_ids)
-        chunk_summaries.append({**window, "removed_ids": removed_ids})
+        maximum_removals = math.floor(len(decision_ids) * max_ai_removal_ratio)
+        removal_ratio = (
+            len(requested_removed_ids) / len(decision_ids) if decision_ids else 0.0
+        )
+        safety_limit_exceeded = len(requested_removed_ids) > maximum_removals
+        applied_removed_ids = [] if safety_limit_exceeded else requested_removed_ids
+        print(f"Gemini requested removals: {len(requested_removed_ids)}")
+        print(f"Gemini removed IDs: {requested_removed_ids}")
+        print(f"AI removal ratio: {removal_ratio:.1%}")
+        print(f"Maximum AI removal ratio: {max_ai_removal_ratio:.1%}")
+        print(f"Safety limit exceeded: {'YES' if safety_limit_exceeded else 'NO'}")
+        print(f"Applied AI removals: {len(applied_removed_ids)}")
+        if safety_limit_exceeded:
+            rejected_ai_removal_count += len(requested_removed_ids)
+            print("AI removal safety limit exceeded.")
+            print(f"Chunk: {chunk_index}/{len(windows)}")
+            print(f"Decision notes: {len(decision_ids)}")
+            print(f"Requested removals: {len(requested_removed_ids)}")
+            print(f"Maximum allowed: {maximum_removals}")
+            print(
+                "Action: rejected AI removals; kept original notes for this chunk."
+            )
+        gemini_removed_ids.extend(applied_removed_ids)
+        chunk_summaries.append(
+            {
+                **window,
+                "requested_removed_ids": requested_removed_ids,
+                "removed_ids": applied_removed_ids,
+                "maximum_ai_removals": maximum_removals,
+                "safety_limit_exceeded": safety_limit_exceeded,
+            }
+        )
     retained = apply_removed_note_ids(
         notes, [*keyboard_removed_ids, *gemini_removed_ids]
     )
@@ -784,11 +826,22 @@ def optimize_notes_with_ai(notes, options):
         "lightweight_ai_notes": all_ai_notes,
         "chunks": chunk_summaries,
         "keyboard_constraints": constraints,
+        "max_ai_removal_ratio": max_ai_removal_ratio,
         "removed_ids": gemini_removed_ids,
         "keyboard_removed_count": len(keyboard_removed_ids),
         "ai_removed_count": len(set(gemini_removed_ids)),
+        "rejected_ai_removal_count": rejected_ai_removal_count,
         "final_retained_note_count": len(retained),
     }
+    overall_ai_removal_ratio = (
+        len(set(gemini_removed_ids)) / len(notes) if notes else 0.0
+    )
+    print(f"Original notes: {len(notes)}")
+    print(f"Removed by keyboard mapping: {len(keyboard_removed_ids)}")
+    print(f"Removed by AI: {len(set(gemini_removed_ids))}")
+    print(f"Rejected AI removals: {rejected_ai_removal_count}")
+    print(f"Final notes: {len(retained)}")
+    print(f"Overall AI removal percentage: {overall_ai_removal_ratio:.1%}")
     AI_OPTIMIZER_SUMMARY_LOG.parent.mkdir(parents=True, exist_ok=True)
     AI_OPTIMIZER_SUMMARY_LOG.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",

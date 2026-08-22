@@ -42,6 +42,9 @@ class AiProviderTests(unittest.TestCase):
         self.assertIn("- decision", field_section)
         self.assertIn("temporary integer id unique", prompt)
         self.assertIn("Never include context-only IDs in removed_ids", prompt)
+        self.assertIn("The default decision is KEEP", prompt)
+        self.assertIn("Removal requires high confidence", prompt)
+        self.assertNotIn("Prefer melody over accompaniment", prompt)
         self.assertIn('"removed_ids" must be an array of integer IDs', prompt)
 
     def test_gemini_json_recovery_handles_fences_and_extra_text(self):
@@ -140,7 +143,7 @@ class AiProviderTests(unittest.TestCase):
         provider = mock.Mock()
         provider.optimize_midi.return_value = {"removed_ids": [1], "explanation": "remove"}
         with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
-            result = optimize_notes_with_ai(notes, self._options([60, 62]))
+            result = optimize_notes_with_ai(notes, self._options([60, 62], 1.0))
         self.assertEqual(result, [notes[0]])
         self.assertIs(result[0], notes[0])
         self.assertEqual({key: result[0][key] for key in metadata}, metadata)
@@ -157,7 +160,7 @@ class AiProviderTests(unittest.TestCase):
             "removed_ids": [1, 1], "explanation": "duplicate"
         }
         with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
-            result = optimize_notes_with_ai(notes, self._options([60, 62, 64]))
+            result = optimize_notes_with_ai(notes, self._options([60, 62, 64], 1.0))
         self.assertEqual(result, [notes[0], notes[2]])
 
     def test_invalid_removed_id_rejects_result_without_mutating_notes(self):
@@ -192,7 +195,7 @@ class AiProviderTests(unittest.TestCase):
             "midi_ai_optimizer.AI_OPTIMIZER_SUMMARY_LOG",
             Path(directory) / "summary.json",
         ), mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
-            optimize_notes_with_ai(notes, self._options([60, 64]))
+            optimize_notes_with_ai(notes, self._options([60, 64], 1.0))
             summary = json.loads(
                 (Path(directory) / "summary.json").read_text(encoding="utf-8")
             )
@@ -301,11 +304,94 @@ class AiProviderTests(unittest.TestCase):
         self.assertEqual(result, notes)
         self.assertTrue(all(actual is original for actual, original in zip(result, notes)))
 
+    def test_ai_removals_below_limit_are_applied(self):
+        notes = [note(index, start_ms=index * 100) for index in range(20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 1], "explanation": "high confidence"
+        }
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+        self.assertEqual(result, notes[2:])
+
+    def test_ai_removals_at_exact_limit_are_applied(self):
+        notes = [note(index, start_ms=index * 100) for index in range(20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 1, 2], "explanation": "high confidence"
+        }
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+        self.assertEqual(result, notes[3:])
+
+    def test_ai_removals_over_limit_are_rejected_for_whole_chunk(self):
+        notes = [note(index, start_ms=index * 100) for index in range(20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 1, 2, 3], "explanation": "too aggressive"
+        }
+        with TemporaryDirectory() as directory, mock.patch(
+            "midi_ai_optimizer.AI_OPTIMIZER_SUMMARY_LOG",
+            Path(directory) / "summary.json",
+        ), mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+            summary = json.loads(
+                (Path(directory) / "summary.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(result, notes)
+        self.assertEqual(summary["ai_removed_count"], 0)
+        self.assertEqual(summary["rejected_ai_removal_count"], 4)
+        self.assertTrue(summary["chunks"][0]["safety_limit_exceeded"])
+
+    def test_context_notes_do_not_inflate_removal_allowance(self):
+        decision_notes = [note(index, start_ms=6000 + index * 20) for index in range(20)]
+        context_notes = [
+            note(index + 20, start_ms=8100 + index * 20) for index in range(20)
+        ]
+        notes = decision_notes + context_notes
+        provider = mock.Mock()
+        provider.optimize_midi.side_effect = [
+            {"removed_ids": [0, 1, 2, 3], "explanation": "too many"},
+            {"removed_ids": [], "explanation": "keep"},
+        ]
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+        self.assertEqual(result, notes)
+        first_payload = provider.optimize_midi.call_args_list[0].args[1]
+        self.assertEqual(sum(item["decision"] for item in first_payload), 20)
+        self.assertEqual(sum(not item["decision"] for item in first_payload), 20)
+
+    def test_keyboard_removals_do_not_reduce_ai_allowance(self):
+        playable = [note(index, pitch=60, start_ms=index * 100) for index in range(20)]
+        unplayable = [
+            note(index + 20, pitch=61, start_ms=3000 + index * 100)
+            for index in range(10)
+        ]
+        notes = playable + unplayable
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 1, 2], "explanation": "at limit"
+        }
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+        self.assertEqual(result, playable[3:])
+
+    def test_duplicate_ids_do_not_inflate_removal_ratio(self):
+        notes = [note(index, start_ms=index * 100) for index in range(20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 0, 1, 1, 2, 2], "explanation": "duplicates"
+        }
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60]))
+        self.assertEqual(result, notes[3:])
+
     @staticmethod
-    def _options(allowed_notes):
+    def _options(allowed_notes, max_ai_removal_ratio=0.15):
         return {"ai_settings": settings("gemini"),
                 "note_map": tuple(range(min(allowed_notes), max(allowed_notes) + 1)),
-                "playable_note_constraints": get_playable_note_constraints(allowed_notes)}
+                "playable_note_constraints": get_playable_note_constraints(allowed_notes),
+                "max_ai_removal_ratio": max_ai_removal_ratio}
 
 
 if __name__ == "__main__":
