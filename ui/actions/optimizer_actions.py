@@ -25,7 +25,7 @@ class UiOptimizerActionsMixin:
         if provider != PROVIDER_DISABLED:
             self.ai_draft_api_keys[provider] = self.ai_api_key_var.get()
             self.ai_draft_models[provider] = self.ai_model_var.get().strip()
-        options = {
+        return {
             "provider": provider,
             "api_keys": dict(self.ai_draft_api_keys),
             "models": dict(self.ai_draft_models),
@@ -224,7 +224,7 @@ class UiOptimizerActionsMixin:
         ai_options = self._prepare_ai_options_or_prompt(mode)
         if ai_options is None:
             raise ValueError("AI API key is not configured")
-        return {
+        options = {
             "mode": mode,
             "arrangement_style": self.arrangement_style_var.get().strip().lower(),
             "max_notes_per_window": max(1, min(int(self.melody_max_notes_var.get()), 3)),
