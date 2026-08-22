@@ -27,6 +27,7 @@ class UiQueueHandlersMixin:
             "play_done": self._handle_play_done,
             "play_error": self._handle_play_error,
             "optimize_done": self._handle_optimize_done,
+            "optimize_progress": self._handle_optimize_progress,
             "optimize_error": self._handle_optimize_error,
             "rebuild_done": self._handle_rebuild_done,
             "rebuild_error": self._handle_rebuild_error,
@@ -146,6 +147,14 @@ class UiQueueHandlersMixin:
             self.log_message(f"Pitch corrected MIDI: {payload['pitch_corrected_midi']}")
         self.log_message(f"Final 37-Key MIDI: {payload['final_midi']}")
         self.log_message(f"Detected key: {payload['detected_key']}")
+
+    def _handle_optimize_progress(self, payload):
+        message = (
+            "AI Optimizer: processing chunk "
+            f"{payload['current']}/{payload['total']}"
+        )
+        self.set_status(message)
+        self.log_message(message)
 
     def _handle_optimize_error(self, payload):
         self.set_status("MIDI optimization failed")

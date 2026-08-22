@@ -9,6 +9,8 @@ from urllib import error
 from ai_providers import create_provider
 from ai_providers.base import ProviderError
 from ai_providers.gemini_provider import _parse_gemini_json
+from keyboard_mapping import MappingProfile, get_playable_note_constraints
+from midi_ai_optimizer import optimize_notes_with_ai
 
 
 def settings(provider):
@@ -21,6 +23,75 @@ class FakeResponse:
     def read(self): return json.dumps(self.value).encode()
 
 class AiProviderTests(unittest.TestCase):
+    def test_next_ai_request_uses_latest_mapping_constraints(self):
+        note = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
+        prompts = []
+
+        class Provider:
+            def optimize_midi(self, prompt, notes):
+                prompts.append(prompt)
+                return {"notes": notes}
+
+        configured = settings("gemini")
+        mappings = (
+            MappingProfile("First", {60: "a", 61: "s"}),
+            MappingProfile("Changed", {60: "a", 62: "d"}),
+        )
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=Provider()):
+            for mapping in mappings:
+                optimize_notes_with_ai(
+                    [note],
+                    {
+                        "ai_settings": configured,
+                        "note_map": (60, 61, 62),
+                        "playable_note_constraints": get_playable_note_constraints(
+                            mapping
+                        ),
+                    },
+                )
+
+        self.assertIn("Currently mapped MIDI notes: [60, 61]", prompts[0])
+        self.assertIn("Currently mapped MIDI notes: [60, 62]", prompts[1])
+        self.assertIn("Current playable range: C4 (60) to C#4 (61)", prompts[0])
+        self.assertIn("Current playable range: C4 (60) to D4 (62)", prompts[1])
+        self.assertIn("Do not assume a fixed 37-key range", prompts[1])
+        self.assertNotEqual(prompts[0], prompts[1])
+
+    def test_empty_mapping_prevents_ai_request(self):
+        configured = settings("gemini")
+        with mock.patch("midi_ai_optimizer.create_provider") as provider:
+            with self.assertRaisesRegex(ValueError, "no assigned playable notes"):
+                optimize_notes_with_ai(
+                    [],
+                    {
+                        "ai_settings": configured,
+                        "note_map": (60,),
+                        "playable_note_constraints": {},
+                    },
+                )
+        provider.assert_not_called()
+
+    def test_keep_remove_optimizer_rejects_pitch_changes_and_added_notes(self):
+        source = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
+        changed = {**source, "note": 62}
+
+        class Provider:
+            def optimize_midi(self, _prompt, _notes):
+                return {"notes": [changed]}
+
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=Provider()):
+            with self.assertRaisesRegex(ValueError, "KEEP/REMOVE only"):
+                optimize_notes_with_ai(
+                    [source],
+                    {
+                        "ai_settings": settings("gemini"),
+                        "note_map": (60, 61, 62),
+                        "playable_note_constraints": get_playable_note_constraints(
+                            [60, 61, 62]
+                        ),
+                    },
+                )
+
     def test_gemini_json_recovery_handles_fences_and_extra_text(self):
         self.assertEqual(_parse_gemini_json('```json\n{"notes": []}\n```'), {"notes": []})
         self.assertEqual(

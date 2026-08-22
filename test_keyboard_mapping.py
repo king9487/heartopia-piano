@@ -8,6 +8,7 @@ from keyboard_mapping import (
     DEFAULT_MAPPING_PROFILE,
     MappingProfile,
     STANDARD_MAPPING_PROFILE,
+    get_playable_note_constraints,
     load_mapping_profile,
     load_mapping_profiles,
     save_mapping_profile,
@@ -31,6 +32,30 @@ def write_test_midi(path, notes=(60,), ticks=120):
 
 
 class KeyboardMappingTests(unittest.TestCase):
+    def test_playable_constraints_for_contiguous_mapping(self):
+        constraints = get_playable_note_constraints(
+            MappingProfile("Range", {note: f"key-{note}" for note in range(48, 85)})
+        )
+        self.assertEqual(constraints["min_note"], 48)
+        self.assertEqual(constraints["max_note"], 84)
+        self.assertEqual(constraints["min_note_name"], "C3")
+        self.assertEqual(constraints["max_note_name"], "C6")
+        self.assertEqual(constraints["allowed_notes"], list(range(48, 85)))
+
+    def test_playable_constraints_preserve_gaps_and_ignore_invalid_rows(self):
+        constraints = get_playable_note_constraints(
+            {48: "a", 49: "", 52: "d", "bad": "x", 128: "y"}
+        )
+        self.assertEqual(constraints["allowed_notes"], [48, 52])
+
+    def test_playable_constraints_deduplicate_notes(self):
+        constraints = get_playable_note_constraints([60, 60, "62", 62])
+        self.assertEqual(constraints["allowed_notes"], [60, 62])
+
+    def test_empty_mapping_has_clear_error(self):
+        with self.assertRaisesRegex(ValueError, "no assigned playable notes"):
+            get_playable_note_constraints(MappingProfile("Empty", {60: ""}))
+
     def test_mapping_json_is_created_with_defaults_when_missing(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "config" / "keyboard_mappings.json"

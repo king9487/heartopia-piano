@@ -9,6 +9,7 @@ from ai_settings import (
     validate_ai_settings,
 )
 from ai_providers import create_provider
+from keyboard_mapping import get_playable_note_constraints
 
 from midi_rule_engine import (
     RuleNote, normalize_tempo_map, read_midi_notes, seconds_to_ticks,
@@ -40,21 +41,65 @@ DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "max_notes_per_window": 2,
     "min_note_duration_ms": 35,
 }
-OPENAI_OPTIMIZER_PROMPT = """You are optimizing MIDI notes for a 37-key music game.
+OPENAI_OPTIMIZER_PROMPT = """You are optimizing MIDI notes for a keyboard-controlled music game.
 
-Input is a JSON list of note events:
-start_ms, duration_ms, note, velocity.
+Input is a JSON array of note events.
+
+Each note event contains exactly:
+- start_ms
+- duration_ms
+- note
+- velocity
 
 Task:
-- Remove noisy, accidental, or unstable notes.
-- Preserve the recognizable melody.
-- Preserve simple harmony only when it helps.
+- Remove noisy, accidental, duplicate, or unstable notes.
+- Preserve the recognizable main melody.
+- Preserve simple harmony only when it helps the melody.
 - Prefer smooth melodic movement.
-- Avoid too many simultaneous notes.
-- Avoid sudden jumps unless musically necessary.
-- Do not create a new song.
-- Do not change the 37-key note range.
-- Return JSON only."""
+- Avoid excessive simultaneous notes.
+- Avoid sudden pitch jumps unless musically necessary.
+- Prefer melody over accompaniment when they conflict.
+- Do not create or rewrite the song.
+
+KEEP/REMOVE rules:
+- This optimizer is KEEP/REMOVE only.
+- You may only KEEP or REMOVE existing note events.
+- Do not add new notes.
+- Do not modify any field of a retained note.
+- Do not change start_ms.
+- Do not change duration_ms.
+- Do not change note.
+- Do not change velocity.
+- Preserve the chronological order of retained notes.
+
+Output:
+- Return only a valid JSON array of note events.
+- Never return a single note object.
+- Each item must contain exactly: start_ms, duration_ms, note, velocity.
+- Do not include markdown.
+- Do not include code fences.
+- Do not include explanations or any other text."""
+
+
+def build_optimizer_prompt(allowed_notes):
+    constraints = get_playable_note_constraints(allowed_notes)
+
+    return (
+        OPENAI_OPTIMIZER_PROMPT
+        + "\n\nKeyboard constraints:\n"
+        + f"- Current playable range: {constraints['min_note_name']} "
+        + f"({constraints['min_note']}) to {constraints['max_note_name']} "
+        + f"({constraints['max_note']}).\n"
+        + "- Currently mapped MIDI notes: "
+        + json.dumps(constraints["allowed_notes"])
+        + ".\n"
+        + "- Only notes present in the current Keyboard Mapping are playable.\n"
+        + "- Remove any input note whose MIDI note number is not present "
+        + "in the current Keyboard Mapping.\n"
+        + "- Do not assume a fixed 37-key range.\n"
+        + "- Treat the current Keyboard Mapping as the authoritative "
+        + "playable-note configuration."
+    )
 
 
 def _ai_settings_from_options(options=None):
@@ -569,10 +614,39 @@ def optimize_notes_with_ai(notes, options):
         raise RuntimeError("AI provider is disabled")
     if not valid:
         raise RuntimeError(" ".join(errors) or "Invalid AI configuration")
-    result = create_provider(settings).optimize_midi(OPENAI_OPTIMIZER_PROMPT, notes)
-    return validate_note_dicts(
+    if "playable_note_constraints" in options:
+        constraints = options["playable_note_constraints"]
+        if not constraints:
+            raise ValueError(
+                "The current Keyboard Mapping has no assigned playable notes."
+            )
+    else:
+        constraints = get_playable_note_constraints(options.get("note_map") or ())
+    result = create_provider(settings).optimize_midi(
+        build_optimizer_prompt(constraints), notes
+    )
+    optimized = validate_note_dicts(
         result["notes"], note_map=options.get("note_map") or DEFAULT_NOTE_MAP
     )
+    allowed_notes = set(constraints["allowed_notes"])
+    if any(note["note"] not in allowed_notes for note in optimized):
+        raise ValueError(
+            "AI Optimizer returned a note outside the current Keyboard Mapping."
+        )
+    source_counts = {}
+    identity_keys = ("start_ms", "duration_ms", "note", "velocity")
+    for note in notes:
+        identity = tuple(note[key] for key in identity_keys)
+        source_counts[identity] = source_counts.get(identity, 0) + 1
+    for note in optimized:
+        identity = tuple(note[key] for key in identity_keys)
+        if source_counts.get(identity, 0) <= 0:
+            raise ValueError(
+                "AI Optimizer is KEEP/REMOVE only, but the response changed "
+                "or added a note."
+            )
+        source_counts[identity] -= 1
+    return optimized
 
 
 # Backward-compatible public name for integrations importing the old helper.
@@ -616,7 +690,11 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     note_map = options.get("note_map") or DEFAULT_NOTE_MAP
     notes = validate_note_dicts(midi_notes_to_dicts(input_midi), note_map=note_map)
     optimized_notes = []
-    for chunk in split_notes_into_chunks(notes, chunk_ms=options.get("chunk_ms", 8000)):
+    chunks = split_notes_into_chunks(notes, chunk_ms=options.get("chunk_ms", 8000))
+    progress_callback = options.get("progress_callback")
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        if callable(progress_callback):
+            progress_callback(chunk_index, len(chunks))
         optimized_notes.extend(optimize_chunk(chunk, options))
 
     optimized_notes = validate_note_dicts(optimized_notes, note_map=note_map)

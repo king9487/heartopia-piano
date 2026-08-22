@@ -130,6 +130,32 @@ class TimingPreservationTests(unittest.TestCase):
             self.assertTrue(all(note.start_tick in optimized_ticks for note in corrected_notes))
             self.assertTrue(all(note.ppq == 960 for note in corrected_notes))
 
+    def test_optimizer_reports_each_chunk_progress(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            source = folder / "source.mid"
+            optimized = folder / "optimized.mid"
+            write_timing_fixture(source, note_count=40)
+            progress = []
+
+            optimize_37key_midi(
+                source,
+                optimized,
+                options={
+                    "mode": "rule",
+                    "chunk_ms": 1000,
+                    "progress_callback": lambda current, total: progress.append(
+                        (current, total)
+                    ),
+                },
+            )
+
+            self.assertGreater(len(progress), 1)
+            self.assertEqual(
+                progress,
+                [(index, len(progress)) for index in range(1, len(progress) + 1)],
+            )
+
     def test_final_smoothing_documents_deliberate_start_changes(self):
         with TemporaryDirectory() as directory:
             source = Path(directory) / "source.mid"

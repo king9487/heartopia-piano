@@ -108,6 +108,40 @@ def midi_note_name(note):
     return f"{NOTE_NAMES[note % 12]}{note // 12 - 1}"
 
 
+def get_playable_note_constraints(mapping):
+    """Derive playable-note constraints from assigned keyboard mappings."""
+    if isinstance(mapping, MappingProfile):
+        source = mapping.keyboard_map.keys()
+    elif hasattr(mapping, "items"):
+        source = (
+            note for note, key in mapping.items() if str(key or "").strip()
+        )
+    else:
+        source = mapping or ()
+
+    allowed_notes = []
+    for note in source:
+        try:
+            note = int(note)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= note <= 127:
+            allowed_notes.append(note)
+    allowed_notes = sorted(set(allowed_notes))
+    if not allowed_notes:
+        raise ValueError("The current Keyboard Mapping has no assigned playable notes.")
+
+    min_note = allowed_notes[0]
+    max_note = allowed_notes[-1]
+    return {
+        "min_note": min_note,
+        "max_note": max_note,
+        "min_note_name": midi_note_name(min_note),
+        "max_note_name": midi_note_name(max_note),
+        "allowed_notes": allowed_notes,
+    }
+
+
 def default_mapping_profiles():
     return {
         DEFAULT_MAPPING_PROFILE: MappingProfile(

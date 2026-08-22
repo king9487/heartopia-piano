@@ -14,6 +14,7 @@ from converter import rebuild_midi_stages
 from ai_models import model_values_for_provider, selected_model_for_provider
 from ai_providers import ProviderError, create_provider
 from keyboard_profiles import get_keyboard_profile, processing_options_for_profile
+from keyboard_mapping import get_playable_note_constraints
 from midi_ai_optimizer import post_process_37key_midi, test_ai_connection
 from ui.presets import apply_processing_preset
 
@@ -24,7 +25,7 @@ class UiOptimizerActionsMixin:
         if provider != PROVIDER_DISABLED:
             self.ai_draft_api_keys[provider] = self.ai_api_key_var.get()
             self.ai_draft_models[provider] = self.ai_model_var.get().strip()
-        return {
+        options = {
             "provider": provider,
             "api_keys": dict(self.ai_draft_api_keys),
             "models": dict(self.ai_draft_models),
@@ -236,6 +237,11 @@ class UiOptimizerActionsMixin:
             **ai_options,
             **processing_options_for_profile(self.keyboard_profile_var.get()),
         }
+        if mode in ("ai", "openai"):
+            options["playable_note_constraints"] = get_playable_note_constraints(
+                self.get_selected_mapping_profile()
+            )
+        return options
 
     def _raw_midi_for_rebuild(self):
         if self.results:
@@ -312,8 +318,12 @@ class UiOptimizerActionsMixin:
                 **ai_options,
                 **processing_options_for_profile(self.keyboard_profile_var.get()),
             }
-        except (TypeError, ValueError):
-            messagebox.showerror("Invalid setting", "Optimizer settings must be numbers.")
+            if mode in ("ai", "openai"):
+                options["playable_note_constraints"] = get_playable_note_constraints(
+                    self.get_selected_mapping_profile()
+                )
+        except (TypeError, ValueError) as exc:
+            messagebox.showerror("Invalid optimizer configuration", str(exc))
             return
 
         is_ai_mode = mode in ("ai", "openai")
@@ -351,7 +361,15 @@ class UiOptimizerActionsMixin:
 
     def optimize_worker(self, midi_path, options):
         try:
-            result = post_process_37key_midi(midi_path, options=options)
+            worker_options = dict(options)
+            if worker_options.get("mode") in ("ai", "openai"):
+                worker_options["progress_callback"] = lambda current, total: self.queue.put(
+                    (
+                        "optimize_progress",
+                        {"current": current, "total": total},
+                    )
+                )
+            result = post_process_37key_midi(midi_path, options=worker_options)
             self.queue.put(("optimize_done", result))
         except Exception as exc:
             payload = {"message": str(exc)}
