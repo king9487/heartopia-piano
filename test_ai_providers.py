@@ -206,6 +206,72 @@ class AiProviderTests(unittest.TestCase):
         self.assertEqual(summary["removed_ids"], [2])
         self.assertEqual(summary["keyboard_constraints"]["allowed_notes"], [60, 64])
 
+    def test_optimizer_summary_leads_with_counts_and_pipeline_stages(self):
+        notes = [note(index, start_ms=index * 100) for index in range(20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [0, 1], "explanation": "cleanup"
+        }
+        messages = []
+        options = self._options([60])
+        options.update(
+            {
+                "log_callback": messages.append,
+                "optimizer_pipeline_context": {
+                    "original_note_count": 45,
+                    "pipeline_counts": [
+                        {
+                            "stage": "arrange_piano_midi",
+                            "input": 45,
+                            "removed": 25,
+                            "output": 20,
+                            "reason": "test arrangement",
+                        }
+                    ],
+                },
+            }
+        )
+        with TemporaryDirectory() as directory, mock.patch(
+            "midi_ai_optimizer.AI_OPTIMIZER_SUMMARY_LOG",
+            Path(directory) / "summary.json",
+        ), mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            optimize_notes_with_ai(notes, options)
+            logged = json.loads(
+                (Path(directory) / "summary.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(list(logged)[0:2], ["summary", "pipeline_counts"])
+        self.assertEqual(
+            logged["summary"],
+            {
+                "original_note_count": 45,
+                "optimizer_input_note_count": 20,
+                "pre_ai_removed_count": 25,
+                "keyboard_removed_count": 0,
+                "ai_requested_removal_count": 2,
+                "ai_applied_removal_count": 2,
+                "ai_rejected_removal_count": 0,
+                "final_retained_note_count": 18,
+                "ai_applied_removal_percentage": 10.0,
+            },
+        )
+        self.assertEqual(
+            [stage["stage"] for stage in logged["pipeline_counts"]],
+            ["arrange_piano_midi", "keyboard_mapping_filter", "optimize_notes_with_ai"],
+        )
+        chunk = logged["chunks"][0]
+        self.assertEqual(chunk["decision_note_count"], 20)
+        self.assertEqual(chunk["context_only_note_count"], 0)
+        self.assertEqual(chunk["requested_removal_count"], 2)
+        self.assertEqual(chunk["requested_removal_percentage"], 10.0)
+        self.assertEqual(chunk["applied_removed_ids"], [0, 1])
+        self.assertEqual(chunk["applied_removal_count"], 2)
+        self.assertTrue(
+            any(
+                message.startswith("AI Optimizer Summary\nOriginal notes: 45")
+                for message in messages
+            )
+        )
+
     def test_next_request_uses_changed_mapping(self):
         prompts = []
         provider = mock.Mock()

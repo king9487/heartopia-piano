@@ -112,6 +112,14 @@ Output:
 AI_OPTIMIZER_SUMMARY_LOG = Path("logs") / "last_ai_optimizer_summary.json"
 
 
+def _emit_optimizer_log(options, message):
+    callback = (options or {}).get("log_callback")
+    if callable(callback):
+        callback(message)
+    else:
+        print(message)
+
+
 def build_optimizer_prompt(allowed_notes):
     constraints = get_playable_note_constraints(allowed_notes)
 
@@ -754,6 +762,7 @@ def optimize_notes_with_ai(notes, options):
     max_ai_removal_ratio = min(1.0, max(0.0, float(options["max_ai_removal_ratio"])))
     gemini_removed_ids = []
     rejected_ai_removal_count = 0
+    requested_ai_removal_count = 0
     chunk_summaries = []
     for chunk_index, window in enumerate(windows, start=1):
         if callable(progress_callback):
@@ -767,18 +776,20 @@ def optimize_notes_with_ai(notes, options):
             item["decision"] = note_id in decision_ids
             payload.append(item)
         context_only_count = sum(not item["decision"] for item in payload)
-        print(f"Chunk: {chunk_index}/{len(windows)}")
-        print(
+        _emit_optimizer_log(options, f"Chunk: {chunk_index}/{len(windows)}")
+        _emit_optimizer_log(
+            options,
             "Decision window: "
-            f"{window['decision_start_ms']}-{window['decision_end_ms']} ms"
+            f"{window['decision_start_ms']}-{window['decision_end_ms']} ms",
         )
-        print(
+        _emit_optimizer_log(
+            options,
             "Context window: "
-            f"{window['context_start_ms']}-{window['context_end_ms']} ms"
+            f"{window['context_start_ms']}-{window['context_end_ms']} ms",
         )
-        print(f"Decision note count: {len(decision_ids)}")
-        print(f"Context-only note count: {context_only_count}")
-        print(f"Total notes sent: {len(payload)}")
+        _emit_optimizer_log(options, f"Decision note count: {len(decision_ids)}")
+        _emit_optimizer_log(options, f"Context-only note count: {context_only_count}")
+        _emit_optimizer_log(options, f"Total notes sent: {len(payload)}")
         requested_removed_ids = []
         if decision_ids:
             result = provider.optimize_midi(prompt, payload)
@@ -791,27 +802,47 @@ def optimize_notes_with_ai(notes, options):
         )
         safety_limit_exceeded = len(requested_removed_ids) > maximum_removals
         applied_removed_ids = [] if safety_limit_exceeded else requested_removed_ids
-        print(f"Gemini requested removals: {len(requested_removed_ids)}")
-        print(f"Gemini removed IDs: {requested_removed_ids}")
-        print(f"AI removal ratio: {removal_ratio:.1%}")
-        print(f"Maximum AI removal ratio: {max_ai_removal_ratio:.1%}")
-        print(f"Safety limit exceeded: {'YES' if safety_limit_exceeded else 'NO'}")
-        print(f"Applied AI removals: {len(applied_removed_ids)}")
+        requested_ai_removal_count += len(requested_removed_ids)
+        _emit_optimizer_log(
+            options, f"Gemini requested removals: {len(requested_removed_ids)}"
+        )
+        _emit_optimizer_log(options, f"Gemini removed IDs: {requested_removed_ids}")
+        _emit_optimizer_log(options, f"AI removal ratio: {removal_ratio:.1%}")
+        _emit_optimizer_log(
+            options, f"Maximum AI removal ratio: {max_ai_removal_ratio:.1%}"
+        )
+        _emit_optimizer_log(
+            options,
+            f"Safety limit exceeded: {'YES' if safety_limit_exceeded else 'NO'}",
+        )
+        _emit_optimizer_log(
+            options, f"Applied AI removals: {len(applied_removed_ids)}"
+        )
         if safety_limit_exceeded:
             rejected_ai_removal_count += len(requested_removed_ids)
-            print("AI removal safety limit exceeded.")
-            print(f"Chunk: {chunk_index}/{len(windows)}")
-            print(f"Decision notes: {len(decision_ids)}")
-            print(f"Requested removals: {len(requested_removed_ids)}")
-            print(f"Maximum allowed: {maximum_removals}")
-            print(
-                "Action: rejected AI removals; kept original notes for this chunk."
+            _emit_optimizer_log(options, "AI removal safety limit exceeded.")
+            _emit_optimizer_log(options, f"Chunk: {chunk_index}/{len(windows)}")
+            _emit_optimizer_log(options, f"Decision notes: {len(decision_ids)}")
+            _emit_optimizer_log(
+                options, f"Requested removals: {len(requested_removed_ids)}"
+            )
+            _emit_optimizer_log(options, f"Maximum allowed: {maximum_removals}")
+            _emit_optimizer_log(
+                options,
+                "Action: rejected AI removals; kept original notes for this chunk.",
             )
         gemini_removed_ids.extend(applied_removed_ids)
         chunk_summaries.append(
             {
                 **window,
+                "chunk_index": chunk_index,
+                "decision_note_count": len(decision_ids),
+                "context_only_note_count": context_only_count,
                 "requested_removed_ids": requested_removed_ids,
+                "requested_removal_count": len(requested_removed_ids),
+                "requested_removal_percentage": round(removal_ratio * 100, 2),
+                "applied_removed_ids": applied_removed_ids,
+                "applied_removal_count": len(applied_removed_ids),
                 "removed_ids": applied_removed_ids,
                 "maximum_ai_removals": maximum_removals,
                 "safety_limit_exceeded": safety_limit_exceeded,
@@ -836,12 +867,56 @@ def optimize_notes_with_ai(notes, options):
     overall_ai_removal_ratio = (
         len(set(gemini_removed_ids)) / len(notes) if notes else 0.0
     )
-    print(f"Original notes: {len(notes)}")
-    print(f"Removed by keyboard mapping: {len(keyboard_removed_ids)}")
-    print(f"Removed by AI: {len(set(gemini_removed_ids))}")
-    print(f"Rejected AI removals: {rejected_ai_removal_count}")
-    print(f"Final notes: {len(retained)}")
-    print(f"Overall AI removal percentage: {overall_ai_removal_ratio:.1%}")
+    pipeline_context = options.get("optimizer_pipeline_context") or {}
+    original_note_count = int(pipeline_context.get("original_note_count", len(notes)))
+    pre_ai_removed_count = max(0, original_note_count - len(notes))
+    summary_counts = {
+        "original_note_count": original_note_count,
+        "optimizer_input_note_count": len(notes),
+        "pre_ai_removed_count": pre_ai_removed_count,
+        "keyboard_removed_count": len(keyboard_removed_ids),
+        "ai_requested_removal_count": requested_ai_removal_count,
+        "ai_applied_removal_count": len(set(gemini_removed_ids)),
+        "ai_rejected_removal_count": rejected_ai_removal_count,
+        "final_retained_note_count": len(retained),
+        "ai_applied_removal_percentage": round(overall_ai_removal_ratio * 100, 2),
+    }
+    pipeline_counts = list(pipeline_context.get("pipeline_counts") or [])
+    pipeline_counts.extend(
+        [
+            {
+                "stage": "keyboard_mapping_filter",
+                "input": len(notes),
+                "removed": len(keyboard_removed_ids),
+                "output": len(notes) - len(keyboard_removed_ids),
+                "reason": "MIDI notes absent from the active Keyboard Mapping",
+            },
+            {
+                "stage": "optimize_notes_with_ai",
+                "input": len(notes) - len(keyboard_removed_ids),
+                "removed": len(set(gemini_removed_ids)),
+                "output": len(retained),
+                "reason": "Validated Gemini removals accepted by the per-chunk safety limit",
+            },
+        ]
+    )
+    summary = {
+        "summary": summary_counts,
+        "pipeline_counts": pipeline_counts,
+        **summary,
+    }
+    summary_lines = [
+        "AI Optimizer Summary",
+        f"Original notes: {original_note_count}",
+        f"Pre-AI removals: {pre_ai_removed_count}",
+        f"Optimizer input: {len(notes)}",
+        f"Keyboard removals: {len(keyboard_removed_ids)}",
+        f"Gemini requested removals: {requested_ai_removal_count}",
+        f"Gemini applied removals: {len(set(gemini_removed_ids))}",
+        f"Gemini rejected removals: {rejected_ai_removal_count}",
+        f"Final notes: {len(retained)}",
+    ]
+    _emit_optimizer_log(options, "\n".join(summary_lines))
     AI_OPTIMIZER_SUMMARY_LOG.parent.mkdir(parents=True, exist_ok=True)
     AI_OPTIMIZER_SUMMARY_LOG.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
@@ -868,7 +943,21 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
     options = {**DEFAULT_AI_OPTIMIZER_OPTIONS, **(options or {})}
 
     note_map = options.get("note_map") or DEFAULT_NOTE_MAP
-    notes = validate_note_dicts(midi_notes_to_dicts(input_midi), note_map=note_map)
+    loaded_notes = midi_notes_to_dicts(input_midi)
+    notes = validate_note_dicts(loaded_notes, note_map=note_map)
+    pipeline_context = dict(options.get("optimizer_pipeline_context") or {})
+    pipeline_counts = list(pipeline_context.get("pipeline_counts") or [])
+    pipeline_counts.append(
+        {
+            "stage": "optimize_37key_midi_validation",
+            "input": len(loaded_notes),
+            "removed": len(loaded_notes) - len(notes),
+            "output": len(notes),
+            "reason": "Validate MIDI fields, duration, velocity, and configured note range",
+        }
+    )
+    pipeline_context["pipeline_counts"] = pipeline_counts
+    options["optimizer_pipeline_context"] = pipeline_context
     mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
     if mode in (OPTIMIZER_OPENAI, "ai"):
         optimized_notes = optimize_notes_with_ai(notes, options)
@@ -1107,6 +1196,16 @@ def post_process_37key_midi(clean_midi, options=None):
     arrangement_report = None
     legacy_piano_cover_midi = None
     arrangement_name = "Original"
+    original_note_count = len(midi_notes_to_dicts(clean_midi))
+    pipeline_counts = [
+        {
+            "stage": "post_process_37key_midi_input",
+            "input": original_note_count,
+            "removed": 0,
+            "output": original_note_count,
+            "reason": "Notes loaded from the selected clean MIDI",
+        }
+    ]
     if arrangement_style == ARRANGEMENT_PIANO_COVER:
         arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
         arranged_result = arrange_piano_midi(
@@ -1117,6 +1216,23 @@ def post_process_37key_midi(clean_midi, options=None):
         shutil.copyfile(arrangement_midi, legacy_piano_cover_midi)
         arrangement_input = arrangement_midi
         arrangement_name = "Piano Cover"
+        arrangement_output_count = int(
+            arranged_result["statistics"].get("Final Notes", original_note_count)
+        )
+        removed_notes = int(arranged_result["statistics"].get("Removed Notes", 0))
+        merged_notes = int(arranged_result["statistics"].get("Merged Notes", 0))
+        pipeline_counts.append(
+            {
+                "stage": "arrange_piano_midi",
+                "input": original_note_count,
+                "removed": original_note_count - arrangement_output_count,
+                "output": arrangement_output_count,
+                "reason": (
+                    "Piano arranger selection/repeat cleanup: "
+                    f"{removed_notes} removed and {merged_notes} merged"
+                ),
+            }
+        )
     elif arrangement_style == ARRANGEMENT_MELODY_ONLY:
         arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
         arrange_melody_only_midi(clean_midi, arrangement_midi, options=options)
@@ -1124,6 +1240,16 @@ def post_process_37key_midi(clean_midi, options=None):
         shutil.copyfile(arrangement_midi, legacy_piano_cover_midi)
         arrangement_input = arrangement_midi
         arrangement_name = "Melody Only"
+        melody_output_count = len(midi_notes_to_dicts(arrangement_midi))
+        pipeline_counts.append(
+            {
+                "stage": "arrange_melody_only_midi",
+                "input": original_note_count,
+                "removed": original_note_count - melody_output_count,
+                "output": melody_output_count,
+                "reason": "Melody-only arrangement selection",
+            }
+        )
     elif options.get("force_arrangement_stage"):
         # Targeted rebuilds still need a concrete arrangement-stage artifact.
         # For the Original style this is an intentional pass-through, so Safe
@@ -1131,12 +1257,39 @@ def post_process_37key_midi(clean_midi, options=None):
         arrangement_midi = clean_midi.with_name(PIANO_ARRANGED_MIDI_NAME)
         shutil.copyfile(clean_midi, arrangement_midi)
         arrangement_input = arrangement_midi
+        pipeline_counts.append(
+            {
+                "stage": "post_process_37key_midi_arrangement_passthrough",
+                "input": original_note_count,
+                "removed": 0,
+                "output": original_note_count,
+                "reason": "Forced Original arrangement artifact is a file copy",
+            }
+        )
+
+    if len(pipeline_counts) == 1:
+        pipeline_counts.append(
+            {
+                "stage": "post_process_37key_midi_arrangement_passthrough",
+                "input": original_note_count,
+                "removed": 0,
+                "output": original_note_count,
+                "reason": f"{arrangement_name} arrangement does not remove notes",
+            }
+        )
 
     ai_midi = clean_midi.with_name(AI_OPTIMIZED_MIDI_NAME)
     pitch_corrected_midi = clean_midi.with_name(PITCH_CORRECTED_MIDI_NAME)
     final_midi = clean_midi.with_name(FINAL_37KEY_MIDI_NAME)
 
-    optimize_37key_midi(arrangement_input, output_midi=ai_midi, options=options)
+    optimizer_options = dict(options)
+    optimizer_options["optimizer_pipeline_context"] = {
+        "original_note_count": original_note_count,
+        "pipeline_counts": pipeline_counts,
+    }
+    optimize_37key_midi(
+        arrangement_input, output_midi=ai_midi, options=optimizer_options
+    )
     _, key_info = pitch_correct_37key_midi(
         ai_midi, output_midi=pitch_corrected_midi, options=options
     )

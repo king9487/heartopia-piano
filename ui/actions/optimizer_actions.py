@@ -369,6 +369,9 @@ class UiOptimizerActionsMixin:
                         {"current": current, "total": total},
                     )
                 )
+                worker_options["log_callback"] = lambda message: self.queue.put(
+                    ("log", message)
+                )
             result = post_process_37key_midi(midi_path, options=worker_options)
             self.queue.put(("optimize_done", result))
         except Exception as exc:
