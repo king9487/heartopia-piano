@@ -1,6 +1,8 @@
 """OpenAI Responses API provider."""
 import json
-from .base import AiProvider, ProviderError, ProviderTestResult
+from .base import (
+    AiProvider, ProviderError, ProviderTestResult, normalize_removal_result,
+)
 
 class OpenAIProvider(AiProvider):
     provider_name = "openai"
@@ -25,7 +27,7 @@ class OpenAIProvider(AiProvider):
         raise ProviderError("Provider returned an invalid response.", "invalid_response")
     def test_connection(self):
         try:
-            json.loads(self._text(self._request('Return exactly {"notes":[]}.', [], True)))
+            json.loads(self._text(self._request('Return exactly {"removed_ids":[]}.', [], True)))
             return ProviderTestResult(True, "connected", "Connected")
         except ProviderError as exc: return ProviderTestResult(False, exc.status, str(exc))
         except (ValueError, TypeError): return ProviderTestResult(False, "invalid_response", "Provider returned malformed JSON.")
@@ -33,7 +35,11 @@ class OpenAIProvider(AiProvider):
         response = self._request(prompt, payload)
         try: parsed = json.loads(self._text(response))
         except (ValueError, TypeError) as exc: raise ProviderError("Provider returned malformed JSON.", "invalid_response") from exc
-        notes = parsed.get("notes") if isinstance(parsed, dict) else parsed
-        if not isinstance(notes, list): raise ProviderError("Provider response did not contain a notes list.", "invalid_response")
+        try:
+            removed_ids, explanation = normalize_removal_result(
+                parsed, (note.get("id") for note in payload)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ProviderError(str(exc), "invalid_response") from exc
         usage = response.get("usage", {})
-        return self._normalized(notes, parsed.get("explanation", "") if isinstance(parsed, dict) else "", {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")})
+        return self._normalized_removals(removed_ids, explanation, {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")})

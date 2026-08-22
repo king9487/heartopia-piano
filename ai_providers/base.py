@@ -20,6 +20,35 @@ class ProviderError(RuntimeError):
         self.status = status
         self.details = details
 
+
+def normalize_removal_result(parsed, valid_ids):
+    """Validate the common ID-only KEEP/REMOVE provider response."""
+    if not isinstance(parsed, dict):
+        raise ValueError("The JSON root must be an object.")
+    if "notes" in parsed or "removed_notes" in parsed:
+        raise ValueError(
+            "The obsolete note-object response shape is not accepted; "
+            "return removed_ids only."
+        )
+    removed_ids = parsed.get("removed_ids")
+    if not isinstance(removed_ids, list):
+        raise ValueError('The root object must contain a "removed_ids" array.')
+    explanation = parsed.get("explanation", "")
+    if not isinstance(explanation, str):
+        raise ValueError("explanation must be a string when provided.")
+    valid_ids = set(valid_ids)
+    normalized = []
+    seen = set()
+    for index, note_id in enumerate(removed_ids):
+        if isinstance(note_id, bool) or not isinstance(note_id, int):
+            raise ValueError(f"removed_ids[{index}] must be an integer.")
+        if note_id not in valid_ids:
+            raise ValueError(f"removed_ids[{index}] is not present in the input.")
+        if note_id not in seen:
+            seen.add(note_id)
+            normalized.append(note_id)
+    return normalized, explanation
+
 class AiProvider(ABC):
     provider_name = ""
     def __init__(self, settings): self.settings = dict(settings)
@@ -71,3 +100,15 @@ class AiProvider(ABC):
         usage = usage or {}
         return {"notes": notes, "explanation": explanation or "", "provider": self.provider_name,
                 "model": self.settings.get("model", ""), "usage": {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")}}
+    def _normalized_removals(self, removed_ids, explanation="", usage=None):
+        usage = usage or {}
+        return {
+            "removed_ids": list(removed_ids),
+            "explanation": explanation or "",
+            "provider": self.provider_name,
+            "model": self.settings.get("model", ""),
+            "usage": {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+            },
+        }

@@ -1,20 +1,25 @@
-import io
 import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
-from urllib import error
 
 from ai_providers import create_provider
-from ai_providers.base import ProviderError
+from ai_providers.base import ProviderError, normalize_removal_result
 from ai_providers.gemini_provider import _parse_gemini_json
-from keyboard_mapping import MappingProfile, get_playable_note_constraints
+from keyboard_mapping import get_playable_note_constraints
 from midi_ai_optimizer import optimize_notes_with_ai
 
 
 def settings(provider):
-    return {"provider": provider, "api_key": "test-secret", "model": "test-model", "base_url": "http://local.test/v1", "timeout_seconds": 1, "max_retries": 0}
+    return {"provider": provider, "api_key": "test-secret", "model": "test-model",
+            "base_url": "http://local.test/v1", "timeout_seconds": 1, "max_retries": 0}
+
+
+def note(note_id=0, pitch=60, **metadata):
+    return {"id": note_id, "start_ms": note_id * 100, "duration_ms": 90,
+            "note": pitch, "velocity": 90, **metadata}
+
 
 class FakeResponse:
     def __init__(self, value): self.value = value
@@ -22,341 +27,172 @@ class FakeResponse:
     def __exit__(self, *_args): return False
     def read(self): return json.dumps(self.value).encode()
 
+
 class AiProviderTests(unittest.TestCase):
-    def test_next_ai_request_uses_latest_mapping_constraints(self):
-        note = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
-        prompts = []
-
-        class Provider:
-            def optimize_midi(self, prompt, notes):
-                prompts.append(prompt)
-                return {"notes": notes}
-
-        configured = settings("gemini")
-        mappings = (
-            MappingProfile("First", {60: "a", 61: "s"}),
-            MappingProfile("Changed", {60: "a", 62: "d"}),
-        )
-        with mock.patch("midi_ai_optimizer.create_provider", return_value=Provider()):
-            for mapping in mappings:
-                optimize_notes_with_ai(
-                    [note],
-                    {
-                        "ai_settings": configured,
-                        "note_map": (60, 61, 62),
-                        "playable_note_constraints": get_playable_note_constraints(
-                            mapping
-                        ),
-                    },
-                )
-
-        self.assertIn("Currently mapped MIDI notes: [60, 61]", prompts[0])
-        self.assertIn("Currently mapped MIDI notes: [60, 62]", prompts[1])
-        self.assertIn("Current playable range: C4 (60) to C#4 (61)", prompts[0])
-        self.assertIn("Current playable range: C4 (60) to D4 (62)", prompts[1])
-        self.assertIn("Do not assume a fixed 37-key range", prompts[1])
-        self.assertNotEqual(prompts[0], prompts[1])
-
-    def test_empty_mapping_prevents_ai_request(self):
-        configured = settings("gemini")
-        with mock.patch("midi_ai_optimizer.create_provider") as provider:
-            with self.assertRaisesRegex(ValueError, "no assigned playable notes"):
-                optimize_notes_with_ai(
-                    [],
-                    {
-                        "ai_settings": configured,
-                        "note_map": (60,),
-                        "playable_note_constraints": {},
-                    },
-                )
-        provider.assert_not_called()
-
-    def test_keep_remove_optimizer_rejects_pitch_changes_and_added_notes(self):
-        source = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
-        changed = {**source, "note": 62}
-
-        class Provider:
-            def optimize_midi(self, _prompt, _notes):
-                return {"notes": [changed]}
-
-        with mock.patch("midi_ai_optimizer.create_provider", return_value=Provider()):
-            with self.assertRaisesRegex(ValueError, "KEEP/REMOVE only"):
-                optimize_notes_with_ai(
-                    [source],
-                    {
-                        "ai_settings": settings("gemini"),
-                        "note_map": (60, 61, 62),
-                        "playable_note_constraints": get_playable_note_constraints(
-                            [60, 61, 62]
-                        ),
-                    },
-                )
-
     def test_gemini_json_recovery_handles_fences_and_extra_text(self):
-        self.assertEqual(_parse_gemini_json('```json\n{"notes": []}\n```'), {"notes": []})
-        self.assertEqual(
-            _parse_gemini_json('Here is the result: {"notes": []} trailing text'),
-            {"notes": []},
-        )
-
-    def test_gemini_json_recovery_does_not_extract_note_from_truncated_root(self):
-        truncated = '{"notes":[{"start_ms":1,"duration_ms":2,"note":60,"velocity":90},{"start_ms":3'
-        with self.assertRaises(json.JSONDecodeError):
-            _parse_gemini_json(truncated)
+        self.assertEqual(_parse_gemini_json('```json\n{"removed_ids": []}\n```'), {"removed_ids": []})
+        self.assertEqual(_parse_gemini_json('Result: {"removed_ids": [1]} trailing'), {"removed_ids": [1]})
 
     def test_provider_selection(self):
         self.assertEqual(create_provider(settings("openai")).provider_name, "openai")
         self.assertEqual(create_provider(settings("gemini")).provider_name, "gemini")
-        self.assertEqual(create_provider(settings("openai_compatible")).provider_name, "openai_compatible")
 
-    def test_openai_normalized_output(self):
-        response = {"output_text": '{"notes":[],"explanation":"ok"}', "usage": {"input_tokens": 2, "output_tokens": 3}}
+    def test_removal_result_deduplicates_and_validates_ids(self):
+        removed, explanation = normalize_removal_result(
+            {"removed_ids": [2, 2, 0], "explanation": "clean"}, {0, 1, 2}
+        )
+        self.assertEqual((removed, explanation), ([2, 0], "clean"))
+        with self.assertRaisesRegex(ValueError, "not present"):
+            normalize_removal_result({"removed_ids": [9]}, {0, 1})
+        with self.assertRaisesRegex(ValueError, "obsolete"):
+            normalize_removal_result({"notes": []}, set())
+
+    def test_openai_normalizes_removed_ids(self):
+        response = {"output_text": '{"removed_ids":[1],"explanation":"noise"}',
+                    "usage": {"input_tokens": 2, "output_tokens": 3}}
         with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            result = create_provider(settings("openai")).optimize_midi("prompt", [])
-        self.assertEqual(result, {"notes": [], "explanation": "ok", "provider": "openai", "model": "test-model", "usage": {"input_tokens": 2, "output_tokens": 3}})
+            result = create_provider(settings("openai")).optimize_midi("prompt", [note(0), note(1)])
+        self.assertEqual(result["removed_ids"], [1])
 
-    def test_gemini_normalized_output(self):
-        response = {"candidates": [{"content": {"parts": [{"text": '{"notes":[],"explanation":"empty input"}'}]}}], "usageMetadata": {"promptTokenCount": 1}}
-        with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            result = create_provider(settings("gemini")).optimize_midi("prompt", [])
-        self.assertEqual(result["provider"], "gemini")
-        self.assertEqual(result["notes"], [])
-
-    def test_gemini_request_never_uses_openai_model(self):
+    def test_gemini_request_uses_id_schema_and_lightweight_payload(self):
         configured = settings("gemini")
         configured["model"] = "gemini-3-flash-preview"
-        response = {"candidates": [{"content": {"parts": [{"text": '{"notes":[],"explanation":"empty input"}'}]}}]}
-        with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)) as urlopen:
-            create_provider(configured).optimize_midi("prompt", [])
-        request_url = urlopen.call_args.args[0].full_url
-        request_body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
-        self.assertIn("gemini-3-flash-preview", request_url)
-        self.assertNotIn("gpt-", request_url)
-        self.assertEqual(
-            request_body["generationConfig"]["responseJsonSchema"]["required"],
-            ["notes", "removed_notes", "explanation"],
-        )
-        self.assertNotIn("responseSchema", request_body["generationConfig"])
-        self.assertEqual(
-            request_body["generationConfig"]["responseJsonSchema"]["type"],
-            "object",
-        )
-        self.assertEqual(
-            request_body["generationConfig"]["responseJsonSchema"]["properties"]["notes"]["type"],
-            "array",
-        )
-        prompt_text = request_body["contents"][0]["parts"][0]["text"]
-        self.assertIn('The root object must contain a field named "notes".', prompt_text)
-        self.assertGreaterEqual(request_body["generationConfig"]["maxOutputTokens"], 16384)
-        self.assertEqual(
-            request_body["generationConfig"]["thinkingConfig"],
-            {"thinkingLevel": "low"},
-        )
-
-    def test_gemini_reports_output_token_truncation(self):
-        response = {
-            "candidates": [{
-                "finishReason": "MAX_TOKENS",
-                "content": {"parts": [{"text": '{"notes":[{"start_ms":1'}]},
-            }]
-        }
-        with TemporaryDirectory() as temp_dir, mock.patch(
-            "ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", Path(temp_dir) / "last.txt"
-        ), mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            with self.assertRaises(ProviderError) as raised:
-                create_provider(settings("gemini")).optimize_midi("prompt", [{}] * 428)
-        self.assertIn("truncated", str(raised.exception).lower())
+        response = {"candidates": [{"content": {"parts": [{"text":
+            '{"removed_ids":[],"explanation":"keep"}'}]}}]}
+        payload = [note(0)]
+        with TemporaryDirectory() as directory, mock.patch(
+            "ai_providers.gemini_provider.GEMINI_REQUEST_LOG", Path(directory) / "request.json"
+        ), mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)) as urlopen:
+            result = create_provider(configured).optimize_midi("prompt", payload)
+            request_log = json.loads((Path(directory) / "request.json").read_text(encoding="utf-8"))
+        body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        schema = body["generationConfig"]["responseJsonSchema"]
+        self.assertEqual(schema["required"], ["removed_ids"])
+        self.assertEqual(schema["properties"]["removed_ids"]["items"]["type"], "integer")
+        self.assertNotIn("notes", schema["properties"])
+        self.assertEqual(request_log["lightweight_ai_notes"], payload)
+        self.assertEqual(result["removed_ids"], [])
 
     def test_gemini_25_flash_connection_disables_thinking(self):
         configured = settings("gemini")
         configured["model"] = "gemini-2.5-flash"
-        response = {"candidates": [{"content": {"parts": [{"text": '{"notes":[],"removed_notes":[],"explanation":"connection test"}'}]}}]}
+        response = {"candidates": [{"content": {"parts": [{"text":
+            '{"removed_ids":[],"explanation":"connected"}'}]}}]}
         with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)) as urlopen:
             result = create_provider(configured).test_connection()
-        request_body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
         self.assertTrue(result.success)
-        self.assertEqual(request_body["generationConfig"]["maxOutputTokens"], 1024)
-        self.assertEqual(
-            request_body["generationConfig"]["thinkingConfig"],
-            {"thinkingBudget": 0},
-        )
+        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingBudget": 0})
 
-    def test_gemini_empty_candidate_reports_finish_reason(self):
-        response = {"candidates": [{"finishReason": "MAX_TOKENS"}]}
+    def test_gemini_rejects_old_note_object_response(self):
+        response = {"candidates": [{"content": {"parts": [{"text":
+            '{"notes":[],"removed_notes":[],"explanation":"old"}'}]}}]}
         with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            result = create_provider(settings("gemini")).test_connection()
-        self.assertFalse(result.success)
-        self.assertIn("MAX_TOKENS", result.message)
+            with self.assertRaisesRegex(ProviderError, "obsolete"):
+                create_provider(settings("gemini")).optimize_midi("prompt", [])
 
-    def test_gemini_normalizes_supported_note_paths(self):
-        note = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
-        structures = (
-            {"notes": [note], "explanation": "root"},
-            {"optimized_notes": [note], "explanation": "alias"},
-            {"result": {"notes": [note]}, "explanation": "result"},
-            {"data": {"notes": [note]}, "explanation": "data"},
-        )
-        for parsed in structures:
-            response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-            with self.subTest(keys=list(parsed)), mock.patch(
-                "ai_providers.base.request.urlopen", return_value=FakeResponse(response)
-            ):
-                result = create_provider(settings("gemini")).optimize_midi("prompt", [note])
-            self.assertEqual(result["notes"], [note])
-            self.assertEqual(result["provider"], "gemini")
+    def test_no_removed_ids_keeps_original_objects(self):
+        notes = [note(0, start_tick=1), note(1, pitch=62, start_tick=20)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {"removed_ids": [], "explanation": "keep"}
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60, 62]))
+        self.assertEqual(result, notes)
+        self.assertIs(result[0], notes[0])
+        self.assertIs(result[1], notes[1])
 
-    def test_gemini_schema_failures_are_distinct_and_diagnostic(self):
-        cases = (
-            ({"result": {}, "explanation": "missing"}, "No notes field"),
-            ({"notes": "not-a-list", "explanation": "bad"}, "must be a JSON array"),
-            ({"notes": [{"note": 60}], "explanation": "bad"}, "missing required fields"),
-            ({"notes": [{"start_ms": 0, "duration_ms": 0, "note": 60, "velocity": 90}], "explanation": "bad"}, "invalid MIDI note values"),
-        )
-        with TemporaryDirectory() as temp_dir:
-            text_log = Path(temp_dir) / "logs" / "last_gemini_response.txt"
-            json_log = Path(temp_dir) / "logs" / "last_gemini_response.json"
-            for parsed, expected in cases:
-                response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-                with self.subTest(expected=expected), mock.patch(
-                    "ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", text_log
-                ), mock.patch(
-                    "ai_providers.gemini_provider.GEMINI_PARSED_LOG", json_log
-                ), mock.patch(
-                    "ai_providers.base.request.urlopen", return_value=FakeResponse(response)
-                ):
-                    with self.assertRaises(ProviderError) as raised:
-                        create_provider(settings("gemini")).optimize_midi("prompt", [])
-                self.assertEqual(
-                    str(raised.exception),
-                    "Gemini returned valid JSON, but no MIDI notes were found.",
-                )
-                self.assertIn(expected, raised.exception.details)
-                self.assertIn("Top-level keys:", raised.exception.details)
-                self.assertIn("Checked paths:", raised.exception.details)
-                self.assertTrue(text_log.exists())
-                self.assertEqual(json.loads(json_log.read_text(encoding="utf-8")), parsed)
+    def test_removed_id_preserves_original_metadata(self):
+        metadata = {"start_tick": 101, "end_tick": 202, "ppq": 960,
+                    "tempo_map": [[0, 500000], [100, 400000]], "custom": {"source": "untouched"}}
+        notes = [note(0, **metadata), note(1, pitch=62)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {"removed_ids": [1], "explanation": "remove"}
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60, 62]))
+        self.assertEqual(result, [notes[0]])
+        self.assertIs(result[0], notes[0])
+        self.assertEqual({key: result[0][key] for key in metadata}, metadata)
+        payload = provider.optimize_midi.call_args.args[1]
+        self.assertEqual(set(payload[0]), {"id", "start_ms", "duration_ms", "note", "velocity"})
 
-    def test_gemini_unchanged_full_note_list(self):
-        note = {"start_ms": 0, "duration_ms": 100, "note": 60, "velocity": 90}
-        parsed = {"notes": [note, dict(note)], "explanation": "No changes required."}
-        response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-        with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            result = create_provider(settings("gemini")).optimize_midi("prompt", [note, note])
-        self.assertEqual(result["notes"], [note, note])
-
-    def test_gemini_rejects_single_note_root(self):
-        note = {"start_ms": 9, "duration_ms": 1950, "note": 72, "velocity": 64}
-        response = {"candidates": [{"content": {"parts": [{"text": json.dumps(note)}]}}]}
-        with TemporaryDirectory() as temp_dir, mock.patch(
-            "ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", Path(temp_dir) / "last.txt"
-        ), mock.patch(
-            "ai_providers.gemini_provider.GEMINI_PARSED_LOG", Path(temp_dir) / "last.json"
-        ), mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            with self.assertRaises(ProviderError) as raised:
-                create_provider(settings("gemini")).optimize_midi("prompt", [note])
-        self.assertEqual(
-            str(raised.exception),
-            "Gemini returned one note instead of the required notes array.",
-        )
-
-    def test_gemini_rejects_unexpectedly_low_note_count(self):
-        notes = [
-            {"start_ms": i * 100, "duration_ms": 90, "note": 60 + i, "velocity": 90}
-            for i in range(4)
-        ]
-        parsed = {"notes": [notes[0]], "explanation": "Removed most notes."}
-        response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-        with TemporaryDirectory() as temp_dir, mock.patch(
-            "ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", Path(temp_dir) / "last.txt"
-        ), mock.patch(
-            "ai_providers.gemini_provider.GEMINI_PARSED_LOG", Path(temp_dir) / "last.json"
-        ), mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            with self.assertRaises(ProviderError) as raised:
-                create_provider(settings("gemini")).optimize_midi("prompt", notes)
-        self.assertEqual(
-            str(raised.exception),
-            "AI returned only 1 of 4 notes and supplied 0 verified deletions; 3 are required. The result was rejected to prevent data loss.",
-        )
-        self.assertIn("Input note count: 4", raised.exception.details)
-        self.assertIn("Output note count: 1", raised.exception.details)
-
-    def test_gemini_accepts_low_count_with_verified_deletions(self):
-        notes = [
-            {"start_ms": i * 100, "duration_ms": 90, "note": 60 + i, "velocity": 90}
-            for i in range(4)
-        ]
-        parsed = {
-            "notes": [notes[0]],
-            "removed_notes": notes[1:],
-            "explanation": "Removed three noisy notes.",
+    def test_duplicate_removed_ids_are_safe(self):
+        notes = [note(0), note(1, pitch=62), note(2, pitch=64)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [1, 1], "explanation": "duplicate"
         }
-        response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-        with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            result = create_provider(settings("gemini")).optimize_midi("prompt", notes)
-        self.assertEqual(result["notes"], [notes[0]])
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60, 62, 64]))
+        self.assertEqual(result, [notes[0], notes[2]])
 
-    def test_gemini_rejects_unverified_deletion(self):
-        notes = [
-            {"start_ms": i * 100, "duration_ms": 90, "note": 60 + i, "velocity": 90}
-            for i in range(4)
-        ]
-        invented = {"start_ms": 999, "duration_ms": 90, "note": 80, "velocity": 90}
-        parsed = {
-            "notes": [notes[0]],
-            "removed_notes": [notes[1], notes[2], invented],
-            "explanation": "Removed noise.",
+    def test_invalid_removed_id_rejects_result_without_mutating_notes(self):
+        notes = [note(0), note(1, pitch=62)]
+        snapshot = json.loads(json.dumps(notes))
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [99], "explanation": "invalid"
         }
-        response = {"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}
-        with TemporaryDirectory() as temp_dir, mock.patch(
-            "ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", Path(temp_dir) / "last.txt"
-        ), mock.patch(
-            "ai_providers.gemini_provider.GEMINI_PARSED_LOG", Path(temp_dir) / "last.json"
-        ), mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse(response)):
-            with self.assertRaises(ProviderError) as raised:
-                create_provider(settings("gemini")).optimize_midi("prompt", notes)
-        self.assertIn("does not match an available input note", raised.exception.details)
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            with self.assertRaisesRegex(ValueError, "not present"):
+                optimize_notes_with_ai(notes, self._options([60, 62]))
+        self.assertEqual(notes, snapshot)
 
-    def test_connection_failure_and_secret_redaction(self):
-        with mock.patch("ai_providers.base.request.urlopen", side_effect=OSError("failed test-secret")):
-            result = create_provider(settings("openai")).test_connection()
-        self.assertFalse(result.success)
-        self.assertNotIn("test-secret", result.message)
+    def test_mapping_gap_is_prefiltered_before_provider(self):
+        notes = [note(0, 60), note(1, 61), note(2, 64)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {"removed_ids": [], "explanation": "keep"}
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60, 64]))
+        payload = provider.optimize_midi.call_args.args[1]
+        self.assertEqual([item["id"] for item in payload], [0, 2])
+        self.assertEqual(result, [notes[0], notes[2]])
 
-    def test_quota_and_malformed_response(self):
-        quota = error.HTTPError("url", 429, "quota", {}, io.BytesIO())
-        with mock.patch("ai_providers.base.request.urlopen", side_effect=quota):
-            result = create_provider(settings("gemini")).test_connection()
-        self.assertEqual(result.status, "quota_error")
-        with mock.patch("ai_providers.base.request.urlopen", return_value=FakeResponse({"output_text": "not-json"})):
-            with self.assertRaises(ProviderError):
-                create_provider(settings("openai")).optimize_midi("prompt", [])
+    def test_optimizer_summary_logs_filter_and_ai_counts(self):
+        notes = [note(0, 60), note(1, 61), note(2, 64)]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {
+            "removed_ids": [2], "explanation": "remove"
+        }
+        with TemporaryDirectory() as directory, mock.patch(
+            "midi_ai_optimizer.AI_OPTIMIZER_SUMMARY_LOG",
+            Path(directory) / "summary.json",
+        ), mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            optimize_notes_with_ai(notes, self._options([60, 64]))
+            summary = json.loads(
+                (Path(directory) / "summary.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(summary["input_note_count"], 3)
+        self.assertEqual(summary["keyboard_removed_count"], 1)
+        self.assertEqual(summary["ai_removed_count"], 1)
+        self.assertEqual(summary["final_retained_note_count"], 1)
+        self.assertEqual(summary["removed_ids"], [2])
+        self.assertEqual(summary["keyboard_constraints"]["allowed_notes"], [60, 64])
 
-    def test_invalid_model_has_clear_category(self):
-        configured = settings("gemini")
-        configured["model"] = "gemini-3.0-flash"
-        missing = error.HTTPError("url", 404, "missing", {}, io.BytesIO())
-        with mock.patch("ai_providers.base.request.urlopen", side_effect=missing):
-            result = create_provider(configured).test_connection()
-        self.assertEqual(result.status, "model_not_found")
-        self.assertEqual(result.message, "Model not found: gemini-3.0-flash")
+    def test_next_request_uses_changed_mapping(self):
+        prompts = []
+        provider = mock.Mock()
+        provider.optimize_midi.side_effect = lambda prompt, _payload: (
+            prompts.append(prompt) or {"removed_ids": [], "explanation": "keep"}
+        )
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            optimize_notes_with_ai([note(0)], self._options([60, 61]))
+            optimize_notes_with_ai([note(0)], self._options([60, 64]))
+        self.assertIn("Currently mapped MIDI notes: [60, 61]", prompts[0])
+        self.assertIn("Currently mapped MIDI notes: [60, 64]", prompts[1])
 
-    def test_invalid_gemini_json_saves_redacted_diagnostics(self):
-        configured = settings("gemini")
-        response = {"candidates": [{"content": {"parts": [{"text": "bad JSON test-secret"}]}}]}
-        with TemporaryDirectory() as temp_dir:
-            diagnostic = Path(temp_dir) / "logs" / "last_gemini_response.txt"
-            with mock.patch("ai_providers.gemini_provider.GEMINI_RESPONSE_LOG", diagnostic), mock.patch(
-                "ai_providers.base.request.urlopen", return_value=FakeResponse(response)
-            ):
-                with self.assertRaises(ProviderError) as raised:
-                    create_provider(configured).optimize_midi("prompt", [])
-            saved = diagnostic.read_text(encoding="utf-8")
-        self.assertEqual(raised.exception.status, "invalid_response")
-        self.assertIn("Parsing error:", raised.exception.details)
-        self.assertIn("line 1", raised.exception.details)
-        self.assertIn("Raw response preview:", raised.exception.details)
-        self.assertNotIn("test-secret", saved)
-        self.assertIn("[REDACTED]", saved)
+    def test_empty_mapping_blocks_provider(self):
+        with mock.patch("midi_ai_optimizer.create_provider") as provider:
+            with self.assertRaisesRegex(ValueError, "no assigned playable notes"):
+                optimize_notes_with_ai([], {"ai_settings": settings("gemini"), "note_map": (60,),
+                                            "playable_note_constraints": {}})
+        provider.assert_not_called()
+
+    @staticmethod
+    def _options(allowed_notes):
+        return {"ai_settings": settings("gemini"),
+                "note_map": tuple(range(min(allowed_notes), max(allowed_notes) + 1)),
+                "playable_note_constraints": get_playable_note_constraints(allowed_notes)}
+
 
 if __name__ == "__main__":
     unittest.main()

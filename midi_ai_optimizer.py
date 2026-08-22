@@ -9,6 +9,7 @@ from ai_settings import (
     validate_ai_settings,
 )
 from ai_providers import create_provider
+from ai_providers.base import normalize_removal_result
 from keyboard_mapping import get_playable_note_constraints
 
 from midi_rule_engine import (
@@ -63,23 +64,25 @@ Task:
 
 KEEP/REMOVE rules:
 - This optimizer is KEEP/REMOVE only.
-- You may only KEEP or REMOVE existing note events.
+- Every input note has a temporary integer id.
+- Decide only which existing note IDs should be removed.
 - Do not add new notes.
-- Do not modify any field of a retained note.
-- Do not change start_ms.
-- Do not change duration_ms.
-- Do not change note.
-- Do not change velocity.
-- Preserve the chronological order of retained notes.
+- Do not modify notes.
+- Do not invent IDs.
+- Do not return IDs that are not present in the input.
+- Notes not listed in removed_ids are retained unchanged.
 
 Output:
-- Return exactly one valid JSON object containing notes, removed_notes, and explanation.
-- notes must contain the complete retained note collection.
-- removed_notes must contain exact copies of every removed input note.
-- Each note item must contain exactly: start_ms, duration_ms, note, velocity.
+- Return exactly one JSON object.
+- The object must contain removed_ids as a JSON array of integers.
+- The object may contain explanation as a string.
+- Do not return complete note objects.
+- Do not return retained note IDs.
 - Do not include markdown.
 - Do not include code fences.
 - Do not include text outside the JSON object."""
+
+AI_OPTIMIZER_SUMMARY_LOG = Path("logs") / "last_ai_optimizer_summary.json"
 
 
 def build_optimizer_prompt(allowed_notes):
@@ -101,6 +104,40 @@ def build_optimizer_prompt(allowed_notes):
         + "- Treat the current Keyboard Mapping as the authoritative "
         + "playable-note configuration."
     )
+
+
+def build_lightweight_ai_notes(notes, allowed_notes):
+    """Return chunk-local AI payload and deterministic keyboard removals."""
+    allowed_notes = set(allowed_notes)
+    lightweight = []
+    pre_removed_ids = []
+    for note_id, note in enumerate(notes):
+        if int(note["note"]) not in allowed_notes:
+            pre_removed_ids.append(note_id)
+            continue
+        lightweight.append(
+            {
+                "id": note_id,
+                "start_ms": int(note["start_ms"]),
+                "duration_ms": int(note["duration_ms"]),
+                "note": int(note["note"]),
+                "velocity": int(note["velocity"]),
+            }
+        )
+    return lightweight, pre_removed_ids
+
+
+def apply_removed_note_ids(notes, removed_ids):
+    """Retain original note objects in input order after validated removals."""
+    valid_ids = set(range(len(notes)))
+    normalized = set()
+    for index, note_id in enumerate(removed_ids):
+        if isinstance(note_id, bool) or not isinstance(note_id, int):
+            raise ValueError(f"removed_ids[{index}] must be an integer.")
+        if note_id not in valid_ids:
+            raise ValueError(f"removed_ids[{index}] is not present in the input.")
+        normalized.add(note_id)
+    return [note for note_id, note in enumerate(notes) if note_id not in normalized]
 
 
 def _ai_settings_from_options(options=None):
@@ -623,31 +660,36 @@ def optimize_notes_with_ai(notes, options):
             )
     else:
         constraints = get_playable_note_constraints(options.get("note_map") or ())
-    result = create_provider(settings).optimize_midi(
-        build_optimizer_prompt(constraints["allowed_notes"]), notes
+    ai_notes, keyboard_removed_ids = build_lightweight_ai_notes(
+        notes, constraints["allowed_notes"]
     )
-    optimized = validate_note_dicts(
-        result["notes"], note_map=options.get("note_map") or DEFAULT_NOTE_MAP
-    )
-    allowed_notes = set(constraints["allowed_notes"])
-    if any(note["note"] not in allowed_notes for note in optimized):
-        raise ValueError(
-            "AI Optimizer returned a note outside the current Keyboard Mapping."
+    result = {"removed_ids": [], "explanation": ""}
+    if ai_notes:
+        result = create_provider(settings).optimize_midi(
+            build_optimizer_prompt(constraints["allowed_notes"]), ai_notes
         )
-    source_counts = {}
-    identity_keys = ("start_ms", "duration_ms", "note", "velocity")
-    for note in notes:
-        identity = tuple(note[key] for key in identity_keys)
-        source_counts[identity] = source_counts.get(identity, 0) + 1
-    for note in optimized:
-        identity = tuple(note[key] for key in identity_keys)
-        if source_counts.get(identity, 0) <= 0:
-            raise ValueError(
-                "AI Optimizer is KEEP/REMOVE only, but the response changed "
-                "or added a note."
-            )
-        source_counts[identity] -= 1
-    return optimized
+    gemini_removed_ids, _explanation = normalize_removal_result(
+        result, (note["id"] for note in ai_notes)
+    )
+    retained = apply_removed_note_ids(
+        notes, [*keyboard_removed_ids, *gemini_removed_ids]
+    )
+    summary = {
+        "provider": settings.get("provider"),
+        "input_note_count": len(notes),
+        "lightweight_ai_notes": ai_notes,
+        "keyboard_constraints": constraints,
+        "removed_ids": gemini_removed_ids,
+        "keyboard_removed_count": len(keyboard_removed_ids),
+        "ai_removed_count": len(set(gemini_removed_ids)),
+        "final_retained_note_count": len(retained),
+    }
+    AI_OPTIMIZER_SUMMARY_LOG.parent.mkdir(parents=True, exist_ok=True)
+    AI_OPTIMIZER_SUMMARY_LOG.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return retained
 
 
 # Backward-compatible public name for integrations importing the old helper.
@@ -657,28 +699,7 @@ optimize_notes_with_openai = optimize_notes_with_ai
 def optimize_chunk(notes, options):
     mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
     if mode in (OPTIMIZER_OPENAI, "ai"):
-        optimized = validate_note_dicts(
-            optimize_notes_with_ai(notes, options),
-            note_map=options.get("note_map") or DEFAULT_NOTE_MAP,
-        )
-        # Reattach source tick identity only when model timing is unchanged.
-        timing_by_ms = {}
-        for source_note in notes:
-            timing_by_ms.setdefault(
-                (source_note["start_ms"], source_note["duration_ms"]), []
-            ).append(source_note)
-        for optimized_note in optimized:
-            if "start_tick" in optimized_note:
-                continue
-            matches = timing_by_ms.get(
-                (optimized_note["start_ms"], optimized_note["duration_ms"]), []
-            )
-            if matches:
-                source_note = matches.pop(0)
-                for key in ("start_tick", "end_tick", "ppq", "tempo_map"):
-                    if key in source_note:
-                        optimized_note[key] = source_note[key]
-        return optimized
+        return optimize_notes_with_ai(notes, options)
 
     return optimize_notes_with_rules(notes, options)
 
