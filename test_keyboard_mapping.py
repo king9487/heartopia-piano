@@ -13,6 +13,7 @@ from keyboard_mapping import (
     save_mapping_profile,
 )
 from midi_to_keyboard import (
+    OCTAVE_FIT_COMPRESS,
     OCTAVE_FIT_OCTAVE_SHIFT,
     build_keyboard_schedule,
     build_original_keyboard_schedule,
@@ -143,6 +144,26 @@ class KeyboardMappingTests(unittest.TestCase):
             self.assertEqual(
                 [event[2] for event in schedule if event[1] == "down"],
                 [60, 71],
+            )
+
+    def test_compress_mode_scales_actual_midi_extremes_to_mapping_extremes(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "song.mid"
+            write_test_midi(source, notes=(36, 48, 60, 72, 84))
+            profile = MappingProfile(
+                "C4 to C5",
+                {note: f"key-{note}" for note in range(60, 73)},
+            )
+
+            schedule = build_keyboard_schedule(
+                source,
+                mapping_profile=profile,
+                octave_fit_mode=OCTAVE_FIT_COMPRESS,
+            )
+
+            self.assertEqual(
+                [event[2] for event in schedule if event[1] == "down"],
+                [60, 63, 66, 69, 72],
             )
 
 

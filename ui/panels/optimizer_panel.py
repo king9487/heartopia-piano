@@ -79,7 +79,7 @@ def build_optimizer_panel(app, parent, start_row: int) -> int:
     ttk.Combobox(
         cleanup,
         textvariable=app.octave_fit_var,
-        values=("smart", "drop", "octave_shift"),
+        values=("smart", "drop", "octave_shift", "compress"),
         state="readonly",
         width=12,
     ).grid(row=0, column=7, sticky="w", padx=(4, 0))

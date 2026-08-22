@@ -14,6 +14,7 @@ OCTAVE_FIT_OCTAVE_SHIFT = "octave_shift"
 OCTAVE_FIT_SHIFT = "shift"
 OCTAVE_FIT_DROP = "drop"
 OCTAVE_FIT_SMART = "smart"
+OCTAVE_FIT_COMPRESS = "compress"
 
 SMART_MAX_RANGE_DISTANCE = 24
 SMART_MIN_OUT_OF_RANGE_DURATION = 0.08
@@ -381,6 +382,25 @@ def octave_shift_note(note, note_map):
     return None
 
 
+def compress_note_to_map(note, source_lowest, source_highest, note_map):
+    """Scale one pitch from the source range into the assigned keyboard range."""
+    playable_notes = sorted(note_map)
+    if not playable_notes:
+        return None
+
+    target_lowest = playable_notes[0]
+    target_highest = playable_notes[-1]
+    if source_highest <= source_lowest:
+        scaled = (target_lowest + target_highest) / 2
+    else:
+        position = (note - source_lowest) / (source_highest - source_lowest)
+        scaled = target_lowest + position * (target_highest - target_lowest)
+
+    # Custom mappings may contain gaps. Select the closest actually assigned
+    # note, preferring the lower pitch when two candidates are equally close.
+    return min(playable_notes, key=lambda candidate: (abs(candidate - scaled), candidate))
+
+
 def fit_note_to_map(
     note,
     note_map,
@@ -689,18 +709,27 @@ def build_clean_note_events(
 
     filtered_raw_events = drop_close_raw_repeated_notes(filtered_raw_events, merge_gap)
 
+    source_notes = [event[2] for event in filtered_raw_events]
+    source_lowest = min(source_notes, default=None)
+    source_highest = max(source_notes, default=None)
+
     skipped_notes = set()
     for start, end, raw_note, velocity in filtered_raw_events:
         duration = end - start
-        note = fit_note_to_map(
-            raw_note,
-            note_map,
-            octave_fit_mode,
-            duration=duration,
-            velocity=velocity,
-            min_note_duration=min_note_duration,
-            velocity_threshold=velocity_threshold,
-        )
+        if octave_fit_mode == OCTAVE_FIT_COMPRESS:
+            note = compress_note_to_map(
+                raw_note, source_lowest, source_highest, note_map
+            )
+        else:
+            note = fit_note_to_map(
+                raw_note,
+                note_map,
+                octave_fit_mode,
+                duration=duration,
+                velocity=velocity,
+                min_note_duration=min_note_duration,
+                velocity_threshold=velocity_threshold,
+            )
         if note is None:
             # Preserve the useful warning for an explicitly present but empty
             # mapping row.  Such rows no longer expand the playable range.

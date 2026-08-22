@@ -37,7 +37,7 @@ def build_cleanup_panel(app, parent, start_row=0):
     ttk.Combobox(
         cleanup,
         textvariable=app.octave_fit_var,
-        values=("smart", "drop", "octave_shift"),
+        values=("smart", "drop", "octave_shift", "compress"),
         state="readonly",
         width=12,
     ).grid(row=0, column=3, sticky="w", padx=(8, 0), pady=(0, 8))
