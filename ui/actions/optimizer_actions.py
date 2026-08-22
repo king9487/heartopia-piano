@@ -316,19 +316,38 @@ class UiOptimizerActionsMixin:
             messagebox.showerror("Invalid setting", "Optimizer settings must be numbers.")
             return
 
-        self.status_var.set("Optimizing MIDI")
+        is_ai_mode = mode in ("ai", "openai")
+        status_message = (
+            "AI Optimizer is processing MIDI..."
+            if is_ai_mode
+            else "Optimizing MIDI..."
+        )
+        self.status_var.set(status_message)
         self.log_message(
             "Optimizing MIDI with "
             f"{self.arrangement_style_var.get()} arrangement / "
             f"{self.optimizer_mode_var.get()} mode: {midi_path}"
         )
         self.log_message(f"Keyboard profile: {options['keyboard_profile']}")
+        if is_ai_mode:
+            self.log_message(
+                "AI Optimizer request started. Processing may take a while; "
+                "the result will appear when it finishes."
+            )
+        self.root.update_idletasks()
         thread = threading.Thread(
             target=self.optimize_worker,
             args=(midi_path, options),
             daemon=True,
         )
         thread.start()
+        if is_ai_mode:
+            messagebox.showinfo(
+                "AI Optimizer",
+                "AI Optimizer is processing the MIDI now.\n\n"
+                "This may take a while. You can close this message; "
+                "processing will continue in the background.",
+            )
 
     def optimize_worker(self, midi_path, options):
         try:
