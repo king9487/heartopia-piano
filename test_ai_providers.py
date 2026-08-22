@@ -8,7 +8,11 @@ from ai_providers import create_provider
 from ai_providers.base import ProviderError, normalize_removal_result
 from ai_providers.gemini_provider import _parse_gemini_json
 from keyboard_mapping import get_playable_note_constraints
-from midi_ai_optimizer import build_optimizer_prompt, optimize_notes_with_ai
+from midi_ai_optimizer import (
+    build_ai_chunk_windows,
+    build_optimizer_prompt,
+    optimize_notes_with_ai,
+)
 
 
 def settings(provider):
@@ -35,7 +39,9 @@ class AiProviderTests(unittest.TestCase):
             "Task:", 1
         )[0]
         self.assertIn("- id", field_section)
+        self.assertIn("- decision", field_section)
         self.assertIn("temporary integer id unique", prompt)
+        self.assertIn("Never include context-only IDs in removed_ids", prompt)
         self.assertIn('"removed_ids" must be an array of integer IDs', prompt)
 
     def test_gemini_json_recovery_handles_fences_and_extra_text(self):
@@ -139,7 +145,10 @@ class AiProviderTests(unittest.TestCase):
         self.assertIs(result[0], notes[0])
         self.assertEqual({key: result[0][key] for key in metadata}, metadata)
         payload = provider.optimize_midi.call_args.args[1]
-        self.assertEqual(set(payload[0]), {"id", "start_ms", "duration_ms", "note", "velocity"})
+        self.assertEqual(
+            set(payload[0]),
+            {"id", "start_ms", "duration_ms", "note", "velocity", "decision"},
+        )
 
     def test_duplicate_removed_ids_are_safe(self):
         notes = [note(0), note(1, pitch=62), note(2, pitch=64)]
@@ -212,6 +221,85 @@ class AiProviderTests(unittest.TestCase):
                 optimize_notes_with_ai([], {"ai_settings": settings("gemini"), "note_map": (60,),
                                             "playable_note_constraints": {}})
         provider.assert_not_called()
+
+    def test_middle_chunk_has_previous_and_future_context(self):
+        notes = [
+            note(0, start_ms=5900),
+            note(1, start_ms=6100),
+            note(2, start_ms=8000),
+            note(3, start_ms=15999),
+            note(4, start_ms=17000),
+            note(5, start_ms=18100),
+        ]
+        windows = build_ai_chunk_windows(notes)
+        middle = next(item for item in windows if item["decision_start_ms"] == 8000)
+        self.assertEqual(
+            (middle["decision_start_ms"], middle["decision_end_ms"]),
+            (8000, 16000),
+        )
+        self.assertEqual(
+            (middle["context_start_ms"], middle["context_end_ms"]),
+            (6000, 18000),
+        )
+        self.assertEqual(middle["note_ids"], [1, 2, 3, 4])
+        self.assertEqual(middle["decision_ids"], [2, 3])
+
+    def test_first_and_final_chunk_context_are_clamped(self):
+        notes = [note(0, start_ms=100), note(1, start_ms=16500, duration_ms=300)]
+        windows = build_ai_chunk_windows(notes)
+        self.assertEqual(windows[0]["context_start_ms"], 0)
+        self.assertEqual(windows[-1]["decision_start_ms"], 16000)
+        self.assertEqual(windows[-1]["decision_end_ms"], 16800)
+        self.assertEqual(windows[-1]["context_end_ms"], 16800)
+
+    def test_boundary_note_has_one_decision_owner_and_neighbor_context(self):
+        notes = [note(0, start_ms=7500), note(1, start_ms=8000)]
+        windows = build_ai_chunk_windows(notes)
+        self.assertEqual(
+            sum(1 in window["decision_ids"] for window in windows), 1
+        )
+        self.assertNotIn(1, windows[0]["decision_ids"])
+        self.assertIn(1, windows[0]["note_ids"])
+        self.assertIn(1, windows[1]["decision_ids"])
+        self.assertIn(0, windows[1]["note_ids"])
+        self.assertNotIn(0, windows[1]["decision_ids"])
+
+    def test_context_id_returned_by_provider_is_rejected(self):
+        notes = [note(0, start_ms=7500), note(1, start_ms=8500)]
+        provider = mock.Mock()
+        provider.optimize_midi.side_effect = [
+            {"removed_ids": [], "explanation": "keep"},
+            {"removed_ids": [0], "explanation": "invalid context removal"},
+        ]
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            with self.assertRaisesRegex(ValueError, "not present"):
+                optimize_notes_with_ai(notes, self._options([60]))
+        second_payload = provider.optimize_midi.call_args_list[1].args[1]
+        context_note = next(item for item in second_payload if item["id"] == 0)
+        self.assertFalse(context_note["decision"])
+
+    def test_global_ids_and_decisions_are_stable_across_requests(self):
+        notes = [
+            note(0, start_ms=7500, start_tick=75),
+            note(1, start_ms=8500, pitch=62, start_tick=85),
+            note(2, start_ms=16500, pitch=64, start_tick=165),
+        ]
+        provider = mock.Mock()
+        provider.optimize_midi.return_value = {"removed_ids": [], "explanation": "keep"}
+        with mock.patch("midi_ai_optimizer.create_provider", return_value=provider):
+            result = optimize_notes_with_ai(notes, self._options([60, 62, 64]))
+        payloads = [call.args[1] for call in provider.optimize_midi.call_args_list]
+        id_zero_occurrences = [
+            item for payload in payloads for item in payload if item["id"] == 0
+        ]
+        self.assertEqual([item["decision"] for item in id_zero_occurrences], [True, False])
+        decision_ids = [
+            item["id"] for payload in payloads for item in payload if item["decision"]
+        ]
+        self.assertEqual(sorted(decision_ids), [0, 1, 2])
+        self.assertEqual(len(decision_ids), len(set(decision_ids)))
+        self.assertEqual(result, notes)
+        self.assertTrue(all(actual is original for actual, original in zip(result, notes)))
 
     @staticmethod
     def _options(allowed_notes):

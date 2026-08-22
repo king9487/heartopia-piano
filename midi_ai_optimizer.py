@@ -34,10 +34,15 @@ PIANO_COVER_MIDI_NAME = "piano_cover_37key.mid"
 ARRANGEMENT_ORIGINAL = "original"
 ARRANGEMENT_MELODY_ONLY = "melody_only"
 ARRANGEMENT_PIANO_COVER = "piano_cover"
+DEFAULT_DECISION_WINDOW_MS = 8000
+DEFAULT_CONTEXT_BEFORE_MS = 2000
+DEFAULT_CONTEXT_AFTER_MS = 2000
 DEFAULT_AI_OPTIMIZER_OPTIONS = {
     "mode": OPTIMIZER_RULE,
     "arrangement_style": ARRANGEMENT_PIANO_COVER,
-    "chunk_ms": 8000,
+    "chunk_ms": DEFAULT_DECISION_WINDOW_MS,
+    "context_before_ms": DEFAULT_CONTEXT_BEFORE_MS,
+    "context_after_ms": DEFAULT_CONTEXT_AFTER_MS,
     "window_ms": 50,
     "max_notes_per_window": 2,
     "min_note_duration_ms": 35,
@@ -52,6 +57,7 @@ Each note event contains exactly:
 - duration_ms
 - note
 - velocity
+- decision
 
 Task:
 - Remove noisy, accidental, duplicate, or unstable notes.
@@ -65,13 +71,21 @@ Task:
 
 KEEP/REMOVE rules:
 - This optimizer is KEEP/REMOVE only.
-- Every input note has a temporary integer id unique to this optimization request.
+- Every input note has a temporary integer id unique to this optimization run.
 - Decide only which existing note IDs should be removed.
 - Do not add new notes.
 - Do not modify notes.
 - Do not invent IDs.
 - Do not return IDs that are not present in the input.
 - Notes not listed in removed_ids are retained unchanged.
+
+Chunk context:
+- Some input notes are provided only as musical context.
+- Each note has a "decision" field.
+- You may only remove notes where decision is true.
+- Notes where decision is false are context only.
+- Never include context-only IDs in removed_ids.
+- Use context-only notes to understand melodic direction, harmony, repetition, and phrase continuity.
 
 Output:
 - Return exactly one JSON object.
@@ -107,9 +121,10 @@ def build_optimizer_prompt(allowed_notes):
     )
 
 
-def build_lightweight_ai_notes(notes, allowed_notes):
-    """Return chunk-local AI payload and deterministic keyboard removals."""
+def build_lightweight_ai_notes(notes, allowed_notes, decision_ids=None):
+    """Return globally indexed AI payload and deterministic keyboard removals."""
     allowed_notes = set(allowed_notes)
+    decision_ids = set(range(len(notes))) if decision_ids is None else set(decision_ids)
     lightweight = []
     pre_removed_ids = []
     for note_id, note in enumerate(notes):
@@ -123,9 +138,60 @@ def build_lightweight_ai_notes(notes, allowed_notes):
                 "duration_ms": int(note["duration_ms"]),
                 "note": int(note["note"]),
                 "velocity": int(note["velocity"]),
+                "decision": note_id in decision_ids,
             }
         )
     return lightweight, pre_removed_ids
+
+
+def build_ai_chunk_windows(
+    notes,
+    decision_window_ms=DEFAULT_DECISION_WINDOW_MS,
+    context_before_ms=DEFAULT_CONTEXT_BEFORE_MS,
+    context_after_ms=DEFAULT_CONTEXT_AFTER_MS,
+):
+    """Build half-open decision windows with overlapping, context-only notes."""
+    if not notes:
+        return []
+    decision_window_ms = max(1000, int(decision_window_ms))
+    context_before_ms = max(0, int(context_before_ms))
+    context_after_ms = max(0, int(context_after_ms))
+    indexed = sorted(
+        enumerate(notes), key=lambda item: (int(item[1]["start_ms"]), item[0])
+    )
+    song_end_ms = max(
+        int(note["start_ms"]) + int(note["duration_ms"]) for note in notes
+    )
+    owner_indexes = sorted(
+        {int(note["start_ms"]) // decision_window_ms for _, note in indexed}
+    )
+    windows = []
+    for owner_index in owner_indexes:
+        decision_start_ms = owner_index * decision_window_ms
+        decision_end_ms = min(decision_start_ms + decision_window_ms, song_end_ms)
+        context_start_ms = max(0, decision_start_ms - context_before_ms)
+        context_end_ms = min(song_end_ms, decision_end_ms + context_after_ms)
+        note_ids = [
+            note_id
+            for note_id, note in indexed
+            if context_start_ms <= int(note["start_ms"]) < context_end_ms
+        ]
+        decision_ids = [
+            note_id
+            for note_id, note in indexed
+            if decision_start_ms <= int(note["start_ms"]) < decision_end_ms
+        ]
+        windows.append(
+            {
+                "decision_start_ms": decision_start_ms,
+                "decision_end_ms": decision_end_ms,
+                "context_start_ms": context_start_ms,
+                "context_end_ms": context_end_ms,
+                "note_ids": note_ids,
+                "decision_ids": decision_ids,
+            }
+        )
+    return windows
 
 
 def apply_removed_note_ids(notes, removed_ids):
@@ -661,24 +727,62 @@ def optimize_notes_with_ai(notes, options):
             )
     else:
         constraints = get_playable_note_constraints(options.get("note_map") or ())
-    ai_notes, keyboard_removed_ids = build_lightweight_ai_notes(
+    all_ai_notes, keyboard_removed_ids = build_lightweight_ai_notes(
         notes, constraints["allowed_notes"]
     )
-    result = {"removed_ids": [], "explanation": ""}
-    if ai_notes:
-        result = create_provider(settings).optimize_midi(
-            build_optimizer_prompt(constraints["allowed_notes"]), ai_notes
-        )
-    gemini_removed_ids, _explanation = normalize_removal_result(
-        result, (note["id"] for note in ai_notes)
+    ai_notes_by_id = {note["id"]: note for note in all_ai_notes}
+    windows = build_ai_chunk_windows(
+        notes,
+        decision_window_ms=options["chunk_ms"],
+        context_before_ms=options["context_before_ms"],
+        context_after_ms=options["context_after_ms"],
     )
+    provider = create_provider(settings)
+    prompt = build_optimizer_prompt(constraints["allowed_notes"])
+    progress_callback = options.get("progress_callback")
+    gemini_removed_ids = []
+    chunk_summaries = []
+    for chunk_index, window in enumerate(windows, start=1):
+        if callable(progress_callback):
+            progress_callback(chunk_index, len(windows))
+        decision_ids = set(window["decision_ids"]) & set(ai_notes_by_id)
+        payload = []
+        for note_id in window["note_ids"]:
+            if note_id not in ai_notes_by_id:
+                continue
+            item = dict(ai_notes_by_id[note_id])
+            item["decision"] = note_id in decision_ids
+            payload.append(item)
+        context_only_count = sum(not item["decision"] for item in payload)
+        print(f"Chunk {chunk_index}/{len(windows)}")
+        print(
+            "Decision window: "
+            f"{window['decision_start_ms']}-{window['decision_end_ms']} ms"
+        )
+        print(
+            "Context window: "
+            f"{window['context_start_ms']}-{window['context_end_ms']} ms"
+        )
+        print(f"Decision note count: {len(decision_ids)}")
+        print(f"Context-only note count: {context_only_count}")
+        print(f"Total notes sent: {len(payload)}")
+        removed_ids = []
+        if decision_ids:
+            result = provider.optimize_midi(prompt, payload)
+            removed_ids, _explanation = normalize_removal_result(
+                result, decision_ids
+            )
+        print(f"Gemini removed IDs: {removed_ids}")
+        gemini_removed_ids.extend(removed_ids)
+        chunk_summaries.append({**window, "removed_ids": removed_ids})
     retained = apply_removed_note_ids(
         notes, [*keyboard_removed_ids, *gemini_removed_ids]
     )
     summary = {
         "provider": settings.get("provider"),
         "input_note_count": len(notes),
-        "lightweight_ai_notes": ai_notes,
+        "lightweight_ai_notes": all_ai_notes,
+        "chunks": chunk_summaries,
         "keyboard_constraints": constraints,
         "removed_ids": gemini_removed_ids,
         "keyboard_removed_count": len(keyboard_removed_ids),
@@ -712,13 +816,17 @@ def optimize_37key_midi(input_midi, output_midi=None, options=None):
 
     note_map = options.get("note_map") or DEFAULT_NOTE_MAP
     notes = validate_note_dicts(midi_notes_to_dicts(input_midi), note_map=note_map)
-    optimized_notes = []
-    chunks = split_notes_into_chunks(notes, chunk_ms=options.get("chunk_ms", 8000))
-    progress_callback = options.get("progress_callback")
-    for chunk_index, chunk in enumerate(chunks, start=1):
-        if callable(progress_callback):
-            progress_callback(chunk_index, len(chunks))
-        optimized_notes.extend(optimize_chunk(chunk, options))
+    mode = _normalize_optimizer_mode(options.get("mode") or OPTIMIZER_RULE)
+    if mode in (OPTIMIZER_OPENAI, "ai"):
+        optimized_notes = optimize_notes_with_ai(notes, options)
+    else:
+        optimized_notes = []
+        chunks = split_notes_into_chunks(notes, chunk_ms=options["chunk_ms"])
+        progress_callback = options.get("progress_callback")
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            if callable(progress_callback):
+                progress_callback(chunk_index, len(chunks))
+            optimized_notes.extend(optimize_chunk(chunk, options))
 
     optimized_notes = validate_note_dicts(optimized_notes, note_map=note_map)
     write_clean_midi(dicts_to_rule_notes(optimized_notes), output_midi)
