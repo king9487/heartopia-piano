@@ -8,7 +8,7 @@ from ai_providers import create_provider
 from ai_providers.base import ProviderError, normalize_removal_result
 from ai_providers.gemini_provider import _parse_gemini_json
 from keyboard_mapping import get_playable_note_constraints
-from midi_ai_optimizer import optimize_notes_with_ai
+from midi_ai_optimizer import build_optimizer_prompt, optimize_notes_with_ai
 
 
 def settings(provider):
@@ -29,6 +29,15 @@ class FakeResponse:
 
 
 class AiProviderTests(unittest.TestCase):
+    def test_optimizer_prompt_defines_temporary_id_field(self):
+        prompt = build_optimizer_prompt([60, 64])
+        field_section = prompt.split("Each note event contains exactly:", 1)[1].split(
+            "Task:", 1
+        )[0]
+        self.assertIn("- id", field_section)
+        self.assertIn("temporary integer id unique", prompt)
+        self.assertIn('"removed_ids" must be an array of integer IDs', prompt)
+
     def test_gemini_json_recovery_handles_fences_and_extra_text(self):
         self.assertEqual(_parse_gemini_json('```json\n{"removed_ids": []}\n```'), {"removed_ids": []})
         self.assertEqual(_parse_gemini_json('Result: {"removed_ids": [1]} trailing'), {"removed_ids": [1]})
@@ -46,6 +55,14 @@ class AiProviderTests(unittest.TestCase):
             normalize_removal_result({"removed_ids": [9]}, {0, 1})
         with self.assertRaisesRegex(ValueError, "obsolete"):
             normalize_removal_result({"notes": []}, set())
+        with self.assertRaisesRegex(ValueError, "must be an integer"):
+            normalize_removal_result({"removed_ids": ["1"]}, {1})
+        with self.assertRaisesRegex(ValueError, "removed_ids"):
+            normalize_removal_result(
+                {"id": 0, "start_ms": 0, "duration_ms": 90,
+                 "note": 60, "velocity": 90},
+                {0},
+            )
 
     def test_openai_normalizes_removed_ids(self):
         response = {"output_text": '{"removed_ids":[1],"explanation":"noise"}',
@@ -68,7 +85,10 @@ class AiProviderTests(unittest.TestCase):
         body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
         schema = body["generationConfig"]["responseJsonSchema"]
         self.assertEqual(schema["required"], ["removed_ids"])
+        self.assertEqual(schema["type"], "object")
+        self.assertFalse(schema["additionalProperties"])
         self.assertEqual(schema["properties"]["removed_ids"]["items"]["type"], "integer")
+        self.assertEqual(schema["properties"]["explanation"]["type"], "string")
         self.assertNotIn("notes", schema["properties"])
         self.assertEqual(request_log["lightweight_ai_notes"], payload)
         self.assertEqual(result["removed_ids"], [])

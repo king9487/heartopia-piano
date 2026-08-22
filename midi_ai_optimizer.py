@@ -47,6 +47,7 @@ OPENAI_OPTIMIZER_PROMPT = """You are optimizing MIDI notes for a keyboard-contro
 Input is a JSON array of note events.
 
 Each note event contains exactly:
+- id
 - start_ms
 - duration_ms
 - note
@@ -64,7 +65,7 @@ Task:
 
 KEEP/REMOVE rules:
 - This optimizer is KEEP/REMOVE only.
-- Every input note has a temporary integer id.
+- Every input note has a temporary integer id unique to this optimization request.
 - Decide only which existing note IDs should be removed.
 - Do not add new notes.
 - Do not modify notes.
@@ -74,13 +75,13 @@ KEEP/REMOVE rules:
 
 Output:
 - Return exactly one JSON object.
-- The object must contain removed_ids as a JSON array of integers.
-- The object may contain explanation as a string.
-- Do not return complete note objects.
-- Do not return retained note IDs.
-- Do not include markdown.
-- Do not include code fences.
-- Do not include text outside the JSON object."""
+- The root object must contain "removed_ids".
+- "removed_ids" must be an array of integer IDs from the input.
+- If no notes should be removed, return an empty array.
+- You may include a short string field named "explanation".
+- Do not return notes, removed_notes, retained IDs, or complete note objects.
+- Do not invent IDs.
+- Do not include Markdown, code fences, or text outside the JSON object."""
 
 AI_OPTIMIZER_SUMMARY_LOG = Path("logs") / "last_ai_optimizer_summary.json"
 

@@ -13,16 +13,6 @@ LOGGER = logging.getLogger(__name__)
 GEMINI_RESPONSE_LOG = Path("logs") / "last_gemini_response.txt"
 GEMINI_PARSED_LOG = Path("logs") / "last_gemini_response.json"
 GEMINI_REQUEST_LOG = Path("logs") / "last_gemini_request.json"
-GEMINI_OUTPUT_INSTRUCTIONS = """
-Return exactly one JSON object.
-Do not use Markdown.
-Do not include explanatory text outside JSON.
-The root object must contain a field named "removed_ids".
-"removed_ids" must be a JSON array of integer IDs from the input.
-If no notes should be removed, return an empty "removed_ids" array.
-Do not return notes, removed_notes, retained IDs, or complete note objects.
-You may include a short string field named "explanation".
-""".strip()
 GEMINI_RESPONSE_SCHEMA = {
     "type": "object",
     "required": ["removed_ids"],
@@ -135,7 +125,14 @@ class GeminiProvider(AiProvider):
         model = quote(self.settings["model"], safe="")
         key = quote(self.settings["api_key"], safe="")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-        text = prompt if test else prompt + "\n\n" + GEMINI_OUTPUT_INSTRUCTIONS + f"\n\nInput note count: {len(payload)}" + "\n\nNotes JSON:\n" + json.dumps(payload, separators=(",", ":"))
+        text = (
+            prompt
+            if test
+            else prompt
+            + f"\n\nInput note count: {len(payload)}"
+            + "\n\nNotes JSON:\n"
+            + json.dumps(payload, separators=(",", ":"))
+        )
         serialized_payload = json.dumps(payload, separators=(",", ":"))
         output_token_budget = 1024 if test else max(
             1024, min(8192, len(serialized_payload) // 8 + 512)
