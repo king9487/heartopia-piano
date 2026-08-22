@@ -91,6 +91,12 @@ class AiProviderTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["explanation"]["type"], "string")
         self.assertNotIn("notes", schema["properties"])
         self.assertEqual(request_log["lightweight_ai_notes"], payload)
+        self.assertEqual(request_log["generation_config"], body["generationConfig"])
+        self.assertEqual(request_log["request_body"], body)
+        self.assertEqual(
+            request_log["request_body"]["generationConfig"]["responseJsonSchema"],
+            schema,
+        )
         self.assertEqual(result["removed_ids"], [])
 
     def test_gemini_25_flash_connection_disables_thinking(self):

@@ -148,6 +148,10 @@ class GeminiProvider(AiProvider):
             generation_config["thinkingConfig"] = {"thinkingLevel": "low"}
         elif model_name.startswith("gemini-2.5-flash"):
             generation_config["thinkingConfig"] = {"thinkingBudget": 0}
+        body = {
+            "contents": [{"role": "user", "parts": [{"text": text}]}],
+            "generationConfig": generation_config,
+        }
         if not test:
             GEMINI_REQUEST_LOG.parent.mkdir(parents=True, exist_ok=True)
             GEMINI_REQUEST_LOG.write_text(
@@ -157,6 +161,8 @@ class GeminiProvider(AiProvider):
                         "input_note_count": len(payload),
                         "lightweight_ai_notes": payload,
                         "prompt": prompt,
+                        "generation_config": generation_config,
+                        "request_body": body,
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -164,7 +170,6 @@ class GeminiProvider(AiProvider):
                 + "\n",
                 encoding="utf-8",
             )
-        body = {"contents": [{"role": "user", "parts": [{"text": text}]}], "generationConfig": generation_config}
         return self._post_json(url, body, {"Content-Type": "application/json"})
     def _text(self, response):
         try:
