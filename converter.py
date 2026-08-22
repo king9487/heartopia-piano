@@ -58,6 +58,23 @@ DEFAULT_SEPARATION_MODE = "Demucs vocals only"
 DEFAULT_SEPARATION_STEM = "no_vocals"
 
 
+def youtube_download_base_args():
+    """Arguments required for reliable modern YouTube extraction."""
+    return [
+        find_executable("yt-dlp"),
+        "--no-playlist",
+        "--no-check-certificates",
+        "--socket-timeout",
+        "20",
+        "--retries",
+        "2",
+        "--js-runtimes",
+        "node",
+        "--extractor-args",
+        "youtube:player_client=web_embedded",
+    ]
+
+
 def sanitize_filename(value, max_length=120):
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
@@ -68,14 +85,8 @@ def sanitize_filename(value, max_length=120):
 
 def get_youtube_info(url, cancel_token=None):
     output = run_capture(
-        [
-            find_executable("yt-dlp"),
-            "--no-playlist",
-            "--no-check-certificates",
-            "--socket-timeout",
-            "20",
-            "--retries",
-            "2",
+        youtube_download_base_args()
+        + [
             "-J",
             "--skip-download",
             url,
@@ -725,14 +736,8 @@ def download_youtube_audio(url, output_dir, cancel_token=None):
         raise RuntimeError("ffmpeg/ffprobe not found")
 
     run(
-        [
-            find_executable("yt-dlp"),
-            "--no-playlist",
-            "--no-check-certificates",
-            "--socket-timeout",
-            "20",
-            "--retries",
-            "2",
+        youtube_download_base_args()
+        + [
             "-x",
             "--ffmpeg-location",
             ffmpeg_location,
