@@ -10,3 +10,6 @@ __pycache__/
 analysis_report.json
 config/ai_settings.json
 logs/
+
+# Personal Codex working preferences
+AGENTS.md
