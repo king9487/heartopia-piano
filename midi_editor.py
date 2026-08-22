@@ -4,7 +4,7 @@ from pathlib import Path
 from midi_rule_engine import read_midi_notes, write_clean_midi
 
 
-EDITED_37KEY_MIDI_NAME = "edited_37key.mid"
+EDITED_37KEY_MIDI_NAME = "06_edited_37key.mid"
 RAPID_REPEAT_MS = 80
 SHORT_DURATION_MS = 50
 LOW_VELOCITY = 20

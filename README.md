@@ -108,16 +108,16 @@ Local Audio ─FFmpeg──┘
 原始 .mid/.midi
   → imported.mid（工作副本）
   → Track/Channel 選取與越界處理
-  → selected_parts.mid
-  → clean_37key.mid
-  → piano_arranged_37key.mid
-  → ai_optimized_37key.mid
-  → pitch_corrected_37key.mid
-  → final_37key.mid
+  → 00_selected_parts.mid
+  → 01_clean_37key.mid
+  → 02_piano_arranged_37key.mid
+  → 03_ai_optimized_37key.mid
+  → 04_pitch_corrected_37key.mid
+  → 05_final_37key.mid
   → 可選：transposed / chorus / edited
 ```
 
-External MIDI 可先 Direct Play，不必處理完整 pipeline。勾選 Skip 時，程式仍會建立該階段的 pass-through copy，讓後續檔名與版本選單保持完整；`final_37key.mid` 一律會建立。
+External MIDI 可先 Direct Play，不必處理完整 pipeline。勾選 Skip 時，程式仍會建立該階段的 pass-through copy，讓後續檔名與版本選單保持完整；`05_final_37key.mid` 一律會建立。
 
 ### Timing 與 MIDI 資訊保留
 
@@ -227,7 +227,7 @@ Import 只在先用 `Import MIDI...` 選檔後有內容。
 |---|---|
 | `Track / Channel` | 實體 Track 與 Channel 組合 |
 | `Use Direct` | 點該欄切換臨時 `selected_direct.mid` 的內容；此版本會在 Playback 顯示為 `Imported MIDI`，可設為 Current 或用 A/B 播放。Import 上方的 `Preview/Play Original` 仍使用完整原檔 |
-| `Use Optimization` | 點該欄切換是否寫入 `selected_parts.mid` 並進入 processing pipeline |
+| `Use Optimization` | 點該欄切換是否寫入 `00_selected_parts.mid` 並進入 processing pipeline |
 | `Program / Instrument` | General MIDI program number 與樂器名稱；無明示 program 時可能顯示 default |
 | `Notes` | 該聲部音符數 |
 | `Playable` / `Out of range` | Heartopia map 內／外數量 |
@@ -238,7 +238,7 @@ Import 只在先用 `Import MIDI...` 選檔後有內容。
 
 ### Selected-part out-of-range handling
 
-這組 radio button 同時影響 Direct selection 的臨時檔，以及 `Process Imported MIDI` 建立的 `selected_parts.mid`。
+這組 radio button 同時影響 Direct selection 的臨時檔，以及 `Process Imported MIDI` 建立的 `00_selected_parts.mid`。
 
 | 選項 | 行為 |
 |---|---|
@@ -251,7 +251,7 @@ Import 只在先用 `Import MIDI...` 選檔後有內容。
 | 類型 | 控制項 | 功能 |
 |---|---|---|
 | Button | `Process Imported MIDI` | 以 `Use Optimization` 選取結果和 Optimization 分頁設定執行完整 external MIDI pipeline |
-| Checkbox | `Skip Cleanup` | 不轉換 Cleanup，直接複製 `selected_parts.mid` 成 `clean_37key.mid` |
+| Checkbox | `Skip Cleanup` | 不轉換 Cleanup，直接複製 `00_selected_parts.mid` 成 `01_clean_37key.mid` |
 | Checkbox | `Skip Piano Arranger` | 不重新編曲，直接複製上一階段 |
 | Checkbox | `Skip AI Optimizer` | 不執行 optimizer，直接複製上一階段 |
 | Checkbox | `Skip Pitch Correction` | 不校音，直接複製上一階段 |
@@ -306,7 +306,7 @@ Cleanup 的 `Melody only` 與 `Arrangement style = melody_only` 是不同階段�
 |---|---|
 | `Rule` | 使用本機規則依 duration、velocity、音程連續性與每窗上限挑選音符 |
 | `OpenAI` | 使用 AI Settings 目前選取的 OpenAI、Gemini 或 OpenAI-compatible provider；錯誤會明確顯示，不會靜默回退 Rule |
-| `None` | 不呼叫 OpenAI。依目前實作，pipeline 仍會經過本機 rules 並產生 `ai_optimized_37key.mid`，不是完全 bypass；external MIDI 要真正原樣傳遞此階段請用 `Skip AI Optimizer` |
+| `None` | 不呼叫 OpenAI。依目前實作，pipeline 仍會經過本機 rules 並產生 `03_ai_optimized_37key.mid`，不是完全 bypass；external MIDI 要真正原樣傳遞此階段請用 `Skip AI Optimizer` |
 
 `Optimize MIDI` 從目前可用的 Clean/Raw 來源執行 Arranger、Optimizer、Pitch Correction 與 Final。若同時選 `original + None`，按鈕會提示需改用 Rule/OpenAI 或簡化編曲風格。
 
@@ -345,18 +345,18 @@ Model 下拉選單會隨 provider 切換：OpenAI 預設為 `gpt-4.1-mini`，Gem
 
 Pitch Correction 沒有獨立參數。它會偵測 major/minor scale，對短、弱、離調或突跳音符做移除／鄰近音修正，再交給 Final smoothing。
 
-`Rebuild Final` 優先重用現有 `pitch_corrected_37key.mid`，只重建 Final；缺 prerequisite 時才補建上游。
+`Rebuild Final` 優先重用現有 `04_pitch_corrected_37key.mid`，只重建 Final；缺 prerequisite 時才補建上游。
 
 ### Key Transpose
 
 | 類型 | 設定 | 說明 |
 |---|---|---|
 | Dropdown | `Original Key` | `Auto Detect` 或 12 個 major key 名稱；指定來源大調 |
-| Dropdown | `Target Key` | `Original` 或 12 個 major key；選取後立即產生 `transposed_37key.mid` |
+| Dropdown | `Target Key` | `Original` 或 12 個 major key；選取後立即產生 `06_transposed_37key.mid` |
 | Status | `Detected Key` | 顯示使用／偵測到的原調 |
 | Status | `Transpose` | 顯示實際半音位移 |
 
-Key Transpose 作用於目前 MIDI 並寫新檔；若目前已選 `transposed_37key.mid`，程式會要求先選非 transposed 版本。它不同於 Playback 的即時 `Transpose`。
+Key Transpose 作用於目前 MIDI 並寫新檔；若目前已選 `06_transposed_37key.mid`，程式會要求先選非 transposed 版本。它不同於 Playback 的即時 `Transpose`。
 
 ## Playback 分頁
 
@@ -439,7 +439,7 @@ Studio `Play` 不會把按鍵送到 Heartopia。若顯示 `No MIDI output`，需
 | `Delete selected notes` | 刪除表格中多選的音符 |
 | `Delete same pitch` | 以所選第一個音符為準，刪除所有相同 MIDI pitch |
 | `Delete suspicious notes` | 刪除所有被規則標紅並附原因的音符 |
-| `Save as edited_37key.mid` | 在來源同資料夾寫入 edited 版本；不能以已載入的 `edited_37key.mid` 再覆寫自身 |
+| `Save as 06_edited_37key.mid` | 在來源同資料夾寫入 edited 版本；不能以已載入的 `06_edited_37key.mid` 再覆寫自身 |
 
 Editor 欄位：`start_ms`、`duration_ms`、`note`、`note_name`、`velocity`、`suspicious_reason`。刪除只先改記憶體內清單，按 Save 才寫檔。
 
@@ -489,17 +489,17 @@ Analysis 沒有按鈕、dropdown 或 checkbox。切換 Current MIDI 時，程式
 |---|---|---|
 | Basic Pitch Raw MIDI（檔名由 Basic Pitch 決定） | Audio/YouTube transcription | 最接近音訊辨識結果；通常仍有越界、短音與雜音 |
 | `imported.mid` | External MIDI processing | 原檔工作副本；Type 2 會在副本中正規化為 Type 1 |
-| `selected_parts.mid` | External MIDI processing | 只含 `Use Optimization` 聲部，並套用 selected-part 越界模式 |
+| `00_selected_parts.mid` | External MIDI processing | 只含 `Use Optimization` 聲部，並套用 selected-part 越界模式 |
 | `selected_direct.mid` | Direct Preview/Play 時 | 暫存資料夾中的 Direct selection 工作檔；關閉程式後不保證保留 |
-| `clean_37key.mid` | Cleanup | 移除短／弱音、處理音域、旋律模式與同時音上限；Skip 時是 pass-through copy |
-| `piano_arranged_37key.mid` | Arranger | `piano_cover`／`melody_only` 結果；targeted rebuild 的 `original` 可建立 pass-through；某些 original audio run 可能不產生此檔 |
-| `piano_cover_37key.mid` | Audio/YouTube post-processing 使用簡化 arrangement 時 | `piano_arranged_37key.mid` 的 legacy 相容副本 |
-| `ai_optimized_37key.mid` | Optimizer | Rule 或 Experimental OpenAI 的輸出；Skip 時為 pass-through |
-| `pitch_corrected_37key.mid` | Pitch Correction | 偵測 key 後移除／修正可疑離調與跳音；Skip 時為 pass-through |
-| `final_37key.mid` | Final smoothing | 將時間量化、保證最短音長、避開同 pitch 重疊；通常是 Play to Game 首選 |
-| `transposed_37key.mid` | 改變 Optimization 的 Target Key | 實際寫入新調的版本 |
+| `01_clean_37key.mid` | Cleanup | 移除短／弱音、處理音域、旋律模式與同時音上限；Skip 時是 pass-through copy |
+| `02_piano_arranged_37key.mid` | Arranger | `piano_cover`／`melody_only` 結果；targeted rebuild 的 `original` 可建立 pass-through；某些 original audio run 可能不產生此檔 |
+| `02_piano_cover_legacy.mid` | Audio/YouTube post-processing 使用簡化 arrangement 時 | `02_piano_arranged_37key.mid` 的 legacy 相容副本 |
+| `03_ai_optimized_37key.mid` | Optimizer | Rule 或 Experimental OpenAI 的輸出；Skip 時為 pass-through |
+| `04_pitch_corrected_37key.mid` | Pitch Correction | 偵測 key 後移除／修正可疑離調與跳音；Skip 時為 pass-through |
+| `05_final_37key.mid` | Final smoothing | 將時間量化、保證最短音長、避開同 pitch 重疊；通常是 Play to Game 首選 |
+| `06_transposed_37key.mid` | 改變 Optimization 的 Target Key | 實際寫入新調的版本 |
 | `chorus_37key.mid` | Studio `Export Range` | 所選秒數範圍，平移至 0 秒 |
-| `edited_37key.mid` | Editor Save | 手動刪除後的版本；版本選擇時優先度最高 |
+| `06_edited_37key.mid` | Editor Save | 手動刪除後的版本；版本選擇時優先度最高 |
 
 ### 其他產物
 
@@ -563,7 +563,7 @@ Track 是檔案容器，Channel 才常代表樂器聲部。同一 Track 可有�
 
 超出所選 Keyboard Profile map 的音符沒有對應遊戲按鍵。改用 `Octave shift into playable range` 或 `Drop out-of-range notes`。
 
-### `None` 為什麼仍有 `ai_optimized_37key.mid`？
+### `None` 為什麼仍有 `03_ai_optimized_37key.mid`？
 
 pipeline 固定建立各階段檔案，而且目前 `None` 仍走本機 rules。External MIDI 若要讓此階段完全傳遞上一版本，勾 `Skip AI Optimizer`。
 

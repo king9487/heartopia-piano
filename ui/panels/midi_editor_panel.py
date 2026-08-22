@@ -31,7 +31,7 @@ def build_midi_editor_panel(app, parent, row=3):
     ).grid(row=1, column=0, sticky="w", pady=(8, 0))
     ttk.Button(
         editor_actions,
-        text="Save as edited_37key.mid",
+        text="Save as 06_edited_37key.mid",
         command=app.save_editor_midi,
     ).grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
 

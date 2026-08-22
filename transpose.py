@@ -7,7 +7,7 @@ import mido
 KEY_NAMES = ("C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B")
 KEY_TO_PITCH_CLASS = {name: index for index, name in enumerate(KEY_NAMES)}
 MAJOR_SCALE = (0, 2, 4, 5, 7, 9, 11)
-TRANSPOSED_MIDI_NAME = "transposed_37key.mid"
+TRANSPOSED_MIDI_NAME = "06_transposed_37key.mid"
 
 
 def normalize_key_name(key_name):

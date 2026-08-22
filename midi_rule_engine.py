@@ -14,7 +14,7 @@ from midi_to_keyboard import (
 )
 
 
-CLEAN_37KEY_MIDI_NAME = "clean_37key.mid"
+CLEAN_37KEY_MIDI_NAME = "01_clean_37key.mid"
 SMART_MAX_RANGE_DISTANCE = 24
 DEFAULT_37KEY_CLEAN_OPTIONS = {
     "min_note_duration_ms": 35,

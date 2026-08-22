@@ -251,6 +251,11 @@ class UiOptimizerActionsMixin:
                 return raw_midi
         selected = self.get_selected_midi()
         if selected and selected.name.lower() not in {
+            "06_edited_37key.mid", "01_clean_37key.mid",
+            "02_piano_arranged_37key.mid", "02_piano_cover_legacy.mid",
+            "03_ai_optimized_37key.mid", "04_pitch_corrected_37key.mid",
+            "05_final_37key.mid",
+            # Existing output folders may still contain the pre-prefix names.
             "edited_37key.mid", "clean_37key.mid", "piano_arranged_37key.mid",
             "piano_cover_37key.mid", "ai_optimized_37key.mid",
             "pitch_corrected_37key.mid", "final_37key.mid",

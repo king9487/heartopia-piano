@@ -111,7 +111,7 @@ class UiEditorActionsMixin:
         if output_path.resolve() == self.editor_source_path.resolve():
             messagebox.showerror(
                 "MIDI Editor",
-                "The selected MIDI is already edited_37key.mid. Open its original source "
+                "The selected MIDI is already 06_edited_37key.mid. Open its original source "
                 "before saving so it is not overwritten.",
             )
             return

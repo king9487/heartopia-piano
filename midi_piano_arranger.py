@@ -6,8 +6,8 @@ from midi_rule_engine import RuleNote, read_midi_notes, write_clean_midi
 from midi_to_keyboard import DEFAULT_NOTE_MAP
 
 
-PIANO_ARRANGED_MIDI_NAME = "piano_arranged_37key.mid"
-PIANO_ARRANGEMENT_REPORT_NAME = "piano_arranged_37key_report.json"
+PIANO_ARRANGED_MIDI_NAME = "02_piano_arranged_37key.mid"
+PIANO_ARRANGEMENT_REPORT_NAME = "02_piano_arranged_37key_report.json"
 DEFAULT_PIANO_ARRANGER_OPTIONS = {
     "arrangement_window_ms": 60,
     "max_notes_per_window": 3,

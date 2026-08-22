@@ -66,7 +66,7 @@ class PianoCoverArrangementTests(unittest.TestCase):
                 input_midi,
                 options={"mode": "rule", "arrangement_style": "piano_cover"},
             )
-            self.assertEqual(result["piano_cover_midi"].name, "piano_cover_37key.mid")
+            self.assertEqual(result["piano_cover_midi"].name, "02_piano_cover_legacy.mid")
             self.assertEqual(result["arrangement_mode"], "Piano Cover")
 
     def test_melody_only_style_outputs_one_highest_line(self):

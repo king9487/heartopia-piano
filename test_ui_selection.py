@@ -85,11 +85,11 @@ class MidiSelectionTests(unittest.TestCase):
             folder = Path(directory)
             paths = {
                 "Raw MIDI": folder / "raw.mid",
-                "Clean 37-Key MIDI": folder / "clean_37key.mid",
-                "Piano Arranged MIDI": folder / "piano_arranged_37key.mid",
-                "Piano Cover MIDI": folder / "piano_cover_37key.mid",
-                "Final 37-Key MIDI": folder / "final_37key.mid",
-                "Edited MIDI": folder / "edited_37key.mid",
+                "Clean 37-Key MIDI": folder / "01_clean_37key.mid",
+                "Piano Arranged MIDI": folder / "02_piano_arranged_37key.mid",
+                "Piano Cover MIDI": folder / "02_piano_cover_legacy.mid",
+                "Final 37-Key MIDI": folder / "05_final_37key.mid",
+                "Edited MIDI": folder / "06_edited_37key.mid",
             }
             for path in paths.values():
                 path.touch()

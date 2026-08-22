@@ -48,7 +48,7 @@ class PianoArrangerV2Tests(unittest.TestCase):
                 input_midi,
             )
             result = arrange_piano_midi(input_midi)
-            self.assertEqual(result["output_midi"].name, "piano_arranged_37key.mid")
+            self.assertEqual(result["output_midi"].name, "02_piano_arranged_37key.mid")
             self.assertTrue(result["output_midi"].exists())
             self.assertTrue(result["report_path"].exists())
             report = json.loads(result["report_path"].read_text(encoding="utf-8"))

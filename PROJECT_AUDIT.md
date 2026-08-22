@@ -24,7 +24,7 @@ No unused production classes were identified. The app class, action/helper mixin
 
 - **Severity:** High
 - **Location:** `converter.py:36-44`, `converter.py:231-238`, `converter.py:433-439`
-- **Reason:** `latest_midi_file()` excludes only `GENERATED_MIDI_NAMES`. That set does not include `edited_37key.mid`, `transposed_37key.mid`, or `chorus_37key.mid`. If one of those files is newest, `results_from_output_dir()` can treat it as the raw vocal/accompaniment source. Later rebuilds may then process an edited or range-limited artifact as if it were the original transcription.
+- **Reason:** `latest_midi_file()` must exclude generated variants such as `06_edited_37key.mid`, `06_transposed_37key.mid`, or `chorus_37key.mid`; otherwise a later rebuild could treat one as the original transcription.
 - **Suggested fix:** Centralize every derived filename and exclude all derived artifacts when resolving raw MIDI. Prefer recording the raw source path in a manifest rather than inferring it from modification time.
 - **Estimated effort:** Small, 1-3 hours including regression tests.
 
@@ -32,7 +32,7 @@ No unused production classes were identified. The app class, action/helper mixin
 
 - **Severity:** High
 - **Location:** `converter.py:89-97`, `converter.py:100-228`
-- **Reason:** Local audio and MIDI folder names are based only on the source stem (`name_local`, `name_midi`). Two unrelated files named `song.mid` or `song.wav` collide. A later run overwrites the working copy and standard stages while older optional artifacts such as `edited_37key.mid` can remain and appear selectable for the new source.
+- **Reason:** Local audio and MIDI folder names are based only on the source stem (`name_local`, `name_midi`). Two unrelated files named `song.mid` or `song.wav` collide. A later run overwrites the working copy and standard stages while older optional artifacts such as `06_edited_37key.mid` can remain and appear selectable for the new source.
 - **Suggested fix:** Include a stable hash of the resolved source path and/or file content in the folder name. Store a source manifest and reject/reinitialize a folder whose identity does not match.
 - **Estimated effort:** Medium, 0.5-1 day with migration/compatibility handling.
 
@@ -48,7 +48,7 @@ No unused production classes were identified. The app class, action/helper mixin
 
 - **Severity:** High
 - **Location:** `ui/actions/optimizer_actions.py:44-118`, stage writers in `converter.py` and `midi_ai_optimizer.py`
-- **Reason:** Optimize and rebuild actions do not share a busy/job lock and do not disable all conflicting controls. Multiple daemon threads can write `clean_37key.mid`, `piano_arranged_37key.mid`, `ai_optimized_37key.mid`, `pitch_corrected_37key.mid`, and `final_37key.mid` simultaneously. This can produce partially written or internally inconsistent stage chains.
+- **Reason:** Optimize and rebuild actions do not share a busy/job lock and do not disable all conflicting controls. Multiple daemon threads can write `01_clean_37key.mid`, `02_piano_arranged_37key.mid`, `03_ai_optimized_37key.mid`, `04_pitch_corrected_37key.mid`, and `05_final_37key.mid` simultaneously. This can produce partially written or internally inconsistent stage chains.
 - **Suggested fix:** Add a single per-output-directory job coordinator. Disable conflicting actions while active, write each stage to a temporary sibling, then atomically replace the destination.
 - **Estimated effort:** Medium, 1-2 days with concurrency tests.
 

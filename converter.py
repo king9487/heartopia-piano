@@ -35,8 +35,8 @@ from tools import find_executable, find_ffmpeg_location, run, run_capture
 from midi_to_keyboard import DEFAULT_NOTE_MAP, octave_shift_note
 
 
-CLEAN_37KEY_MIDI_NAME = "clean_37key.mid"
-SELECTED_PARTS_MIDI_NAME = "selected_parts.mid"
+CLEAN_37KEY_MIDI_NAME = "01_clean_37key.mid"
+SELECTED_PARTS_MIDI_NAME = "00_selected_parts.mid"
 GENERATED_MIDI_NAMES = {
     SELECTED_PARTS_MIDI_NAME,
     CLEAN_37KEY_MIDI_NAME,
@@ -45,6 +45,17 @@ GENERATED_MIDI_NAMES = {
     FINAL_37KEY_MIDI_NAME,
     PIANO_COVER_MIDI_NAME,
     PIANO_ARRANGED_MIDI_NAME,
+    "selected_parts.mid",
+    "clean_37key.mid",
+    "piano_arranged_37key.mid",
+    "piano_cover_37key.mid",
+    "ai_optimized_37key.mid",
+    "pitch_corrected_37key.mid",
+    "final_37key.mid",
+    "edited_37key.mid",
+    "transposed_37key.mid",
+    "06_edited_37key.mid",
+    "06_transposed_37key.mid",
 }
 
 SEPARATION_MODES = (
@@ -264,7 +275,7 @@ def import_external_midi(
     final_midi = base_dir / FINAL_37KEY_MIDI_NAME
 
     if skips.get("cleanup"):
-        report_progress("Cleanup skipped; creating clean_37key.mid pass-through.")
+        report_progress(f"Cleanup skipped; creating {CLEAN_37KEY_MIDI_NAME} pass-through.")
         shutil.copyfile(pipeline_input, clean_midi)
     else:
         report_progress("Running Cleanup...")
@@ -274,7 +285,7 @@ def import_external_midi(
     arrangement_report = base_dir / PIANO_ARRANGEMENT_REPORT_NAME
     if skips.get("piano_arranger"):
         report_progress(
-            "Piano Arranger skipped; creating piano_arranged_37key.mid pass-through."
+            f"Piano Arranger skipped; creating {PIANO_ARRANGED_MIDI_NAME} pass-through."
         )
         shutil.copyfile(clean_midi, arranged_midi)
         if arrangement_report.exists():
@@ -291,7 +302,7 @@ def import_external_midi(
 
     if skips.get("ai_optimizer"):
         report_progress(
-            "AI Optimizer skipped; creating ai_optimized_37key.mid pass-through."
+            f"AI Optimizer skipped; creating {AI_OPTIMIZED_MIDI_NAME} pass-through."
         )
         shutil.copyfile(arranged_midi, ai_midi)
     else:
@@ -307,7 +318,7 @@ def import_external_midi(
 
     if skips.get("pitch_correction"):
         report_progress(
-            "Pitch Correction skipped; creating pitch_corrected_37key.mid pass-through."
+            f"Pitch Correction skipped; creating {PITCH_CORRECTED_MIDI_NAME} pass-through."
         )
         shutil.copyfile(ai_midi, pitch_midi)
         detected_key = metadata["key"]
@@ -322,7 +333,7 @@ def import_external_midi(
         )
         detected_key = key_info["name"]
 
-    report_progress("Generating final_37key.mid...")
+    report_progress(f"Generating {FINAL_37KEY_MIDI_NAME}...")
     final_input = pitch_midi
     if inspect_midi_file(pitch_midi)["notes_outside_map"]:
         convert_to_37key_midi(pitch_midi, final_midi, options=options)
@@ -422,8 +433,10 @@ def ensure_clean_37key_midi(raw_midi, options=None):
 def rebuild_midi_stages(raw_midi, start_stage, options=None):
     """Force one MIDI stage and its downstream stages, reusing prerequisites."""
     raw_midi = Path(raw_midi)
-    if raw_midi.name.lower() == "edited_37key.mid":
-        raise ValueError("edited_37key.mid cannot be used as a rebuild source")
+    if raw_midi.name.lower() in {"06_edited_37key.mid", "edited_37key.mid"}:
+        raise ValueError(
+            "06_edited_37key.mid cannot be used as a rebuild source"
+        )
     if not raw_midi.exists():
         raise FileNotFoundError(raw_midi)
     if start_stage not in {"clean", "piano_arranged", "final"}:
@@ -599,6 +612,33 @@ def results_from_output_dir(base_dir):
     accompaniment_pitch_midi = pitch_corrected_midi_path(accompaniment_midi)
     vocal_final_midi = final_37key_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_final_midi = final_37key_midi_path(accompaniment_midi)
+    legacy_names = {
+        CLEAN_37KEY_MIDI_NAME: "clean_37key.mid",
+        PIANO_ARRANGED_MIDI_NAME: "piano_arranged_37key.mid",
+        PIANO_COVER_MIDI_NAME: "piano_cover_37key.mid",
+        AI_OPTIMIZED_MIDI_NAME: "ai_optimized_37key.mid",
+        PITCH_CORRECTED_MIDI_NAME: "pitch_corrected_37key.mid",
+        FINAL_37KEY_MIDI_NAME: "final_37key.mid",
+    }
+
+    def prefer_existing_stage(path):
+        if path is None or path.exists():
+            return path
+        legacy = path.with_name(legacy_names[path.name])
+        return legacy if legacy.exists() else path
+
+    vocal_clean_midi = prefer_existing_stage(vocal_clean_midi)
+    accompaniment_clean_midi = prefer_existing_stage(accompaniment_clean_midi)
+    vocal_arranged_midi = prefer_existing_stage(vocal_arranged_midi)
+    accompaniment_arranged_midi = prefer_existing_stage(accompaniment_arranged_midi)
+    vocal_piano_midi = prefer_existing_stage(vocal_piano_midi)
+    accompaniment_piano_midi = prefer_existing_stage(accompaniment_piano_midi)
+    vocal_ai_midi = prefer_existing_stage(vocal_ai_midi)
+    accompaniment_ai_midi = prefer_existing_stage(accompaniment_ai_midi)
+    vocal_pitch_midi = prefer_existing_stage(vocal_pitch_midi)
+    accompaniment_pitch_midi = prefer_existing_stage(accompaniment_pitch_midi)
+    vocal_final_midi = prefer_existing_stage(vocal_final_midi)
+    accompaniment_final_midi = prefer_existing_stage(accompaniment_final_midi)
     vocal_report_path = (
         Path(vocal_midi).with_name(MIDI_ANALYSIS_REPORT_NAME) if vocal_midi else None
     )

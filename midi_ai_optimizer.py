@@ -21,9 +21,9 @@ from midi_piano_arranger import PIANO_ARRANGED_MIDI_NAME, arrange_piano_midi
 from midi_to_keyboard import DEFAULT_NOTE_MAP
 
 
-AI_OPTIMIZED_MIDI_NAME = "ai_optimized_37key.mid"
-PITCH_CORRECTED_MIDI_NAME = "pitch_corrected_37key.mid"
-FINAL_37KEY_MIDI_NAME = "final_37key.mid"
+AI_OPTIMIZED_MIDI_NAME = "03_ai_optimized_37key.mid"
+PITCH_CORRECTED_MIDI_NAME = "04_pitch_corrected_37key.mid"
+FINAL_37KEY_MIDI_NAME = "05_final_37key.mid"
 PITCH_CLASS_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 MAJOR_SCALE = (0, 2, 4, 5, 7, 9, 11)
 MINOR_SCALE = (0, 2, 3, 5, 7, 8, 10)
@@ -31,7 +31,7 @@ OPTIMIZER_NONE = "none"
 OPTIMIZER_RULE = "rule"
 OPTIMIZER_OPENAI = "openai"
 OPTIMIZER_PIANO_COVER = "piano cover"
-PIANO_COVER_MIDI_NAME = "piano_cover_37key.mid"
+PIANO_COVER_MIDI_NAME = "02_piano_cover_legacy.mid"
 ARRANGEMENT_ORIGINAL = "original"
 ARRANGEMENT_MELODY_ONLY = "melody_only"
 ARRANGEMENT_PIANO_COVER = "piano_cover"
