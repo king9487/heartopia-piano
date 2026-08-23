@@ -32,10 +32,13 @@ class SelectionHarness(MidiSelectionMixin):
         self.available_midi_sources = {}
         self.available_compare_sources = {}
         self.midi_source_var = Variable()
+        self.midi_output_var = Variable()
+        self.midi_choice_var = Variable("accompaniment_midi")
         self.selected_midi_var = Variable()
         self.compare_a_source_var = Variable()
         self.compare_b_source_var = Variable()
         self.midi_source_combo = Combo()
+        self.midi_output_combo = Combo()
         self.compare_a_combo = Combo()
         self.compare_b_combo = Combo()
         self.analysis_vars = {field: Variable("--") for field in ANALYSIS_FIELDS}
@@ -46,6 +49,41 @@ class SelectionHarness(MidiSelectionMixin):
 
 
 class MidiSelectionTests(unittest.TestCase):
+    def test_user_can_select_between_discovered_output_sources(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            full_raw = folder / "full" / "raw.mid"
+            accompaniment_raw = folder / "accompaniment" / "raw.mid"
+            full_raw.parent.mkdir()
+            accompaniment_raw.parent.mkdir()
+            full_raw.touch()
+            accompaniment_raw.touch()
+            (full_raw.parent / "05_final_37key.mid").touch()
+            (accompaniment_raw.parent / "01_clean_37key.mid").touch()
+
+            app = SelectionHarness()
+            app.results = {
+                "midi_outputs": {
+                    "Full audio — No separation": {
+                        "raw_midi": full_raw,
+                        "stem": "no_vocals",
+                    },
+                    "Accompaniment — Demucs vocals only": {
+                        "raw_midi": accompaniment_raw,
+                        "stem": "no_vocals",
+                    },
+                }
+            }
+
+            app.update_selected_midi()
+            self.assertEqual(app.midi_output_var.get(), "Full audio — No separation")
+            self.assertEqual(app.midi_source_var.get(), "Final 37-Key MIDI")
+
+            app.midi_output_var.set("Accompaniment — Demucs vocals only")
+            app.update_selected_midi()
+            self.assertEqual(app.midi_source_var.get(), "Clean 37-Key MIDI")
+            self.assertEqual(app.selected_midi_var.get(), str(accompaniment_raw.parent / "01_clean_37key.mid"))
+
     def test_external_import_sources_and_compare_defaults(self):
         with TemporaryDirectory() as directory:
             folder = Path(directory)

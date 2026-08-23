@@ -45,6 +45,23 @@ class ConvertedOutputTests(unittest.TestCase):
             self.assertEqual(results["separation_mode"], "Demucs vocals only")
             self.assertEqual(results["stem_to_convert"], "no_vocals")
 
+    def test_discovers_all_output_sources_for_user_selection(self):
+        with TemporaryDirectory() as directory:
+            base_dir = Path(directory) / "Multiple_video-id"
+            accompaniment = base_dir / "midi" / "accompaniment"
+            full = base_dir / "midi" / "selected_No separation_no_vocals"
+            accompaniment.mkdir(parents=True)
+            full.mkdir(parents=True)
+            (accompaniment / "accompaniment.mid").touch()
+            (full / "full.mid").touch()
+
+            results = results_from_output_dir(base_dir)
+
+            self.assertEqual(
+                set(results["midi_outputs"]),
+                {"Accompaniment", "Full audio — No separation"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

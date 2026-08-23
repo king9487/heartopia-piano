@@ -43,14 +43,14 @@ def build_midi_sources_panel(app, parent, row=0):
     app.playback_sources_frame = sources
     sources.grid(row=row, column=0, sticky="ew", padx=12, pady=(12, 8))
     sources.columnconfigure(3, weight=1)
-    ttk.Radiobutton(
-        sources, text="Vocals MIDI", value="vocal_midi",
-        variable=app.midi_choice_var, command=app.update_selected_midi,
-    ).grid(row=0, column=0, sticky="w")
-    ttk.Radiobutton(
-        sources, text="Accompaniment MIDI", value="accompaniment_midi",
-        variable=app.midi_choice_var, command=app.update_selected_midi,
-    ).grid(row=0, column=1, sticky="w", padx=(12, 0))
+    ttk.Label(sources, text="Output source").grid(row=0, column=0, sticky="w")
+    app.midi_output_combo = ttk.Combobox(
+        sources, textvariable=app.midi_output_var, state="readonly", width=36
+    )
+    app.midi_output_combo.grid(
+        row=0, column=1, columnspan=3, sticky="ew", padx=(8, 0)
+    )
+    app.midi_output_combo.bind("<<ComboboxSelected>>", app.update_selected_midi)
 
     ttk.Label(sources, text="Converted").grid(row=1, column=0, sticky="w", pady=(8, 0))
     app.cached_combo = ttk.Combobox(
@@ -64,7 +64,7 @@ def build_midi_sources_panel(app, parent, row=0):
         row=1, column=4, sticky="w", padx=(8, 0), pady=(8, 0)
     )
 
-    ttk.Label(sources, text="MIDI source").grid(row=2, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(sources, text="MIDI version").grid(row=2, column=0, sticky="w", pady=(8, 0))
     app.midi_source_combo = ttk.Combobox(
         sources, textvariable=app.midi_source_var, state="readonly", width=28
     )

@@ -50,6 +50,7 @@ def initialize_app_state(app):
     }
     app.always_top_var = tk.BooleanVar(value=True)
     app.midi_choice_var = tk.StringVar(value="accompaniment_midi")
+    app.midi_output_var = tk.StringVar()
     app.midi_source_var = tk.StringVar()
     app.available_midi_sources = {}
     app.compare_a_source_var = tk.StringVar()
@@ -160,6 +161,7 @@ def initialize_app_state(app):
     app.stop_button = None
     app.play_button = None
     app.midi_source_combo = None
+    app.midi_output_combo = None
     app.mapping_profile_combo = None
     app.playback_mapping_profile_combo = None
     app.keyboard_mapping_tree = None

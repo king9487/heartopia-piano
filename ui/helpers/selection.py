@@ -205,6 +205,28 @@ class MidiSelectionMixin:
                 )
             return sources
 
+        output_choices = self.collect_midi_output_choices()
+        selected_output = output_choices.get(self.midi_output_var.get())
+        if selected_output:
+            raw_midi = Path(selected_output["raw_midi"])
+            self.midi_choice_var.set(
+                "vocal_midi"
+                if selected_output.get("stem") == "vocals"
+                else "accompaniment_midi"
+            )
+            sources = {
+                "Piano Arranged MIDI": raw_midi.parent / PIANO_ARRANGED_MIDI_NAME,
+                "Piano Cover MIDI": raw_midi.parent / PIANO_COVER_MIDI_NAME,
+                "Final 37-Key MIDI": raw_midi.parent / FINAL_37KEY_MIDI_NAME,
+                "Pitch Corrected MIDI": raw_midi.parent / PITCH_CORRECTED_MIDI_NAME,
+                "AI Optimized MIDI": raw_midi.parent / AI_OPTIMIZED_MIDI_NAME,
+                "Clean 37-Key MIDI": raw_midi.parent / CLEAN_37KEY_MIDI_NAME,
+                "Raw MIDI": raw_midi,
+                "Transposed MIDI": raw_midi.parent / TRANSPOSED_MIDI_NAME,
+                "Edited MIDI": raw_midi.parent / EDITED_37KEY_MIDI_NAME,
+            }
+            return sources
+
         raw_key = self.midi_choice_var.get()
         if not self.results.get(raw_key) and raw_key == "vocal_midi":
             self.midi_choice_var.set("accompaniment_midi")
@@ -232,7 +254,48 @@ class MidiSelectionMixin:
             sources["Edited MIDI"] = parent_dir / EDITED_37KEY_MIDI_NAME
         return sources
 
+    def collect_midi_output_choices(self):
+        if not self.results or self.results.get("input_source") == "external_midi":
+            return {}
+        if self.results.get("midi_outputs"):
+            return self.results["midi_outputs"]
+
+        choices = {}
+        if self.results.get("accompaniment_midi"):
+            separation_mode = self.results.get("separation_mode")
+            stem = self.results.get("stem_to_convert", "no_vocals")
+            if separation_mode == "No separation":
+                label = "Full audio — No separation"
+            elif separation_mode and separation_mode != "Demucs vocals only":
+                label = f"{stem.replace('_', ' ').title()} — {separation_mode}"
+            else:
+                label = "Accompaniment"
+            choices[label] = {
+                "raw_midi": self.results["accompaniment_midi"],
+                "stem": stem,
+            }
+        if self.results.get("vocal_midi"):
+            choices["Vocals"] = {
+                "raw_midi": self.results["vocal_midi"],
+                "stem": "vocals",
+            }
+        return choices
+
+    def refresh_midi_output_choices(self):
+        choices = self.collect_midi_output_choices()
+        labels = tuple(choices)
+        combo = getattr(self, "midi_output_combo", None)
+        if combo:
+            combo.configure(values=labels)
+        variable = getattr(self, "midi_output_var", None)
+        if variable is not None:
+            if labels and variable.get() not in choices:
+                variable.set(labels[0])
+            elif not labels:
+                variable.set("")
+
     def configure_midi_sources_from_path(self, midi_path):
+        self.refresh_midi_output_choices()
         midi_path = Path(midi_path)
         sources = {
             label: midi_path.parent / filename
@@ -259,6 +322,7 @@ class MidiSelectionMixin:
             update_analysis_from_midi_path(self, midi_path)
 
     def update_selected_midi(self):
+        self.refresh_midi_output_choices()
         self.set_midi_source_options(self.collect_result_midi_sources())
 
     def get_selected_midi(self):

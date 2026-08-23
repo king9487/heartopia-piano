@@ -245,6 +245,10 @@ class UiOptimizerActionsMixin:
 
     def _raw_midi_for_rebuild(self):
         if self.results:
+            output_choices = self.collect_midi_output_choices()
+            selected_output = output_choices.get(self.midi_output_var.get())
+            if selected_output and selected_output.get("raw_midi"):
+                return selected_output["raw_midi"]
             raw_key = self.midi_choice_var.get()
             raw_midi = self.results.get(raw_key)
             if raw_midi:

@@ -385,10 +385,26 @@ def latest_midi_file(output_dir, include_clean=False):
     return midi_files[0] if midi_files else None
 
 
-def latest_selected_midi_output(midi_dir):
-    """Return the newest custom separation output and its saved settings."""
+def discover_midi_outputs(midi_dir):
+    """Return every loadable MIDI output, newest first."""
     candidates = []
     midi_dir = Path(midi_dir)
+    legacy_outputs = (
+        ("Vocals", midi_dir / "vocals", DEFAULT_SEPARATION_MODE, "vocals"),
+        (
+            "Accompaniment",
+            midi_dir / "accompaniment",
+            DEFAULT_SEPARATION_MODE,
+            DEFAULT_SEPARATION_STEM,
+        ),
+    )
+    for label, output_dir, separation_mode, stem in legacy_outputs:
+        raw_midi = latest_midi_file(output_dir)
+        if raw_midi:
+            candidates.append(
+                (raw_midi.stat().st_mtime, label, raw_midi, separation_mode, stem)
+            )
+
     for separation_mode in SEPARATION_MODES:
         for stem in SEPARATION_STEMS:
             output_dir = midi_dir / (
@@ -396,17 +412,36 @@ def latest_selected_midi_output(midi_dir):
             )
             raw_midi = latest_midi_file(output_dir)
             if raw_midi:
+                source_name = (
+                    "Full audio"
+                    if separation_mode == "No separation"
+                    else stem.replace("_", " ").title()
+                )
+                label = f"{source_name} — {separation_mode}"
                 candidates.append(
-                    (raw_midi.stat().st_mtime, raw_midi, separation_mode, stem)
+                    (raw_midi.stat().st_mtime, label, raw_midi, separation_mode, stem)
                 )
 
-    if not candidates:
-        return None, None, None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return {
+        label: {
+            "raw_midi": raw_midi,
+            "separation_mode": separation_mode,
+            "stem": stem,
+        }
+        for _mtime, label, raw_midi, separation_mode, stem in candidates
+    }
 
-    _mtime, raw_midi, separation_mode, stem = max(
-        candidates, key=lambda item: item[0]
+
+def latest_selected_midi_output(midi_dir):
+    """Return the newest custom separation output and its saved settings."""
+    outputs = discover_midi_outputs(midi_dir)
+    selected = next(
+        (value for label, value in outputs.items() if " — " in label), None
     )
-    return raw_midi, separation_mode, stem
+    if not selected:
+        return None, None, None
+    return selected["raw_midi"], selected["separation_mode"], selected["stem"]
 
 
 def clean_37key_midi_path(raw_midi):
@@ -620,6 +655,7 @@ def results_from_output_dir(base_dir):
     other = base_dir / "separated" / "htdemucs" / "song" / "other.wav"
     vocal_midi = latest_midi_file(base_dir / "midi" / "vocals")
     midi_dir = base_dir / "midi"
+    midi_outputs = discover_midi_outputs(midi_dir)
     accompaniment_midi = latest_midi_file(midi_dir / "accompaniment")
     separation_mode = DEFAULT_SEPARATION_MODE
     stem_to_convert = DEFAULT_SEPARATION_STEM
@@ -699,6 +735,7 @@ def results_from_output_dir(base_dir):
         "selected_audio": selected_audio,
         "separation_mode": separation_mode,
         "stem_to_convert": stem_to_convert,
+        "midi_outputs": midi_outputs,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
         "vocal_report_path": (

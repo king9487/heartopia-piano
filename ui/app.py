@@ -65,6 +65,7 @@ class YoutubeMidiApp(
     external_part_tree_items: dict
     always_top_var: Any
     midi_choice_var: Any
+    midi_output_var: Any
     midi_source_var: Any
     available_midi_sources: dict
     compare_a_source_var: Any
@@ -159,6 +160,7 @@ class YoutubeMidiApp(
     stop_button: ttk.Button | None
     play_button: ttk.Button | None
     midi_source_combo: ttk.Combobox | None
+    midi_output_combo: ttk.Combobox | None
     compare_a_combo: ttk.Combobox | None
     compare_b_combo: ttk.Combobox | None
     cached_combo: ttk.Combobox | None
