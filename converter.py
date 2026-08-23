@@ -385,6 +385,30 @@ def latest_midi_file(output_dir, include_clean=False):
     return midi_files[0] if midi_files else None
 
 
+def latest_selected_midi_output(midi_dir):
+    """Return the newest custom separation output and its saved settings."""
+    candidates = []
+    midi_dir = Path(midi_dir)
+    for separation_mode in SEPARATION_MODES:
+        for stem in SEPARATION_STEMS:
+            output_dir = midi_dir / (
+                f"selected_{sanitize_filename(separation_mode)}_{stem}"
+            )
+            raw_midi = latest_midi_file(output_dir)
+            if raw_midi:
+                candidates.append(
+                    (raw_midi.stat().st_mtime, raw_midi, separation_mode, stem)
+                )
+
+    if not candidates:
+        return None, None, None
+
+    _mtime, raw_midi, separation_mode, stem = max(
+        candidates, key=lambda item: item[0]
+    )
+    return raw_midi, separation_mode, stem
+
+
 def clean_37key_midi_path(raw_midi):
     return Path(raw_midi).with_name(CLEAN_37KEY_MIDI_NAME)
 
@@ -595,10 +619,28 @@ def results_from_output_dir(base_dir):
     bass = base_dir / "separated" / "htdemucs" / "song" / "bass.wav"
     other = base_dir / "separated" / "htdemucs" / "song" / "other.wav"
     vocal_midi = latest_midi_file(base_dir / "midi" / "vocals")
-    accompaniment_midi = latest_midi_file(base_dir / "midi" / "accompaniment")
+    midi_dir = base_dir / "midi"
+    accompaniment_midi = latest_midi_file(midi_dir / "accompaniment")
+    separation_mode = DEFAULT_SEPARATION_MODE
+    stem_to_convert = DEFAULT_SEPARATION_STEM
+    if not accompaniment_midi:
+        accompaniment_midi, separation_mode, stem_to_convert = (
+            latest_selected_midi_output(midi_dir)
+        )
 
     if not accompaniment_midi:
         return None
+
+    if separation_mode == "No separation":
+        selected_audio = wav_file
+    else:
+        selected_audio = {
+            "vocals": vocals,
+            "no_vocals": no_vocals,
+            "drums": drums,
+            "bass": bass,
+            "other": other,
+        }.get(stem_to_convert)
 
     vocal_clean_midi = clean_37key_midi_path(vocal_midi) if vocal_midi else None
     accompaniment_clean_midi = clean_37key_midi_path(accompaniment_midi)
@@ -654,9 +696,9 @@ def results_from_output_dir(base_dir):
         "drums": drums if drums.exists() else None,
         "bass": bass if bass.exists() else None,
         "other": other if other.exists() else None,
-        "selected_audio": no_vocals,
-        "separation_mode": DEFAULT_SEPARATION_MODE,
-        "stem_to_convert": DEFAULT_SEPARATION_STEM,
+        "selected_audio": selected_audio,
+        "separation_mode": separation_mode,
+        "stem_to_convert": stem_to_convert,
         "vocal_midi": vocal_midi,
         "accompaniment_midi": accompaniment_midi,
         "vocal_report_path": (
