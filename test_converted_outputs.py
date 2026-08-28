@@ -45,6 +45,30 @@ class ConvertedOutputTests(unittest.TestCase):
             self.assertEqual(results["separation_mode"], "Demucs vocals only")
             self.assertEqual(results["stem_to_convert"], "no_vocals")
 
+    def test_transkun_raw_subdirectory_appears_in_converted_outputs(self):
+        with TemporaryDirectory() as directory:
+            output_root = Path(directory)
+            base_dir = output_root / "能不能和我留在台北 (陪我幾天)_video-id"
+            wav_file = base_dir / "download" / "song.wav"
+            raw_dir = (
+                base_dir
+                / "midi"
+                / "selected_No separation_no_vocals"
+                / "raw_transcription"
+            )
+            wav_file.parent.mkdir(parents=True)
+            raw_dir.mkdir(parents=True)
+            wav_file.touch()
+            raw_midi = raw_dir / "transkun_raw.mid"
+            raw_midi.touch()
+
+            results = results_from_output_dir(base_dir)
+
+            self.assertIsNotNone(results)
+            self.assertEqual(results["accompaniment_midi"], raw_midi)
+            self.assertEqual(results["selected_audio"], wav_file)
+            self.assertIn(base_dir, list_converted_outputs(output_root))
+
     def test_discovers_all_output_sources_for_user_selection(self):
         with TemporaryDirectory() as directory:
             base_dir = Path(directory) / "Multiple_video-id"

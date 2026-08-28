@@ -381,6 +381,9 @@ def import_external_midi(
 def latest_midi_file(output_dir, include_clean=False):
     output_dir = Path(output_dir)
     midi_files = list(output_dir.glob("*.mid"))
+    transkun_raw = output_dir / "raw_transcription" / "transkun_raw.mid"
+    if transkun_raw.is_file():
+        midi_files.append(transkun_raw)
     if not include_clean:
         midi_files = [path for path in midi_files if path.name not in GENERATED_MIDI_NAMES]
 
