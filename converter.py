@@ -1075,13 +1075,13 @@ def convert_audio_to_midi(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_midi = latest_midi_file(output_dir)
-    if existing_midi:
-        print("Using existing MIDI:", existing_midi)
-        return existing_midi
-
     if transcription_engine == "Transkun (WSL)":
         raw_path = output_dir / "raw_transcription" / "transkun_raw.mid"
+        if raw_path.exists():
+            _report_basic_pitch_message(
+                f"Regenerating existing Transkun MIDI: {raw_path}",
+                progress_callback,
+            )
         backend = TranskunWSLBackend(logger=lambda message: _report_basic_pitch_message(
             message, progress_callback
         ))
@@ -1090,6 +1090,11 @@ def convert_audio_to_midi(
         )
     if transcription_engine != "Basic Pitch":
         raise ValueError(f"Unknown transcription engine: {transcription_engine}")
+
+    existing_midi = latest_midi_file(output_dir)
+    if existing_midi:
+        print("Using existing MIDI:", existing_midi)
+        return existing_midi
 
     _report_basic_pitch_message("Transcription engine: Basic Pitch", progress_callback)
     diagnostics = get_basic_pitch_backend_diagnostics()

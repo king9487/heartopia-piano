@@ -143,6 +143,27 @@ class TranskunWSLBackendTests(unittest.TestCase):
             output_arg = backend_type.return_value.transcribe.call_args.args[1]
             self.assertEqual(output_arg.name, "transkun_raw.mid")
 
+    def test_transkun_regenerates_even_when_midi_already_exists(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch(
+            "converter.TranskunWSLBackend"
+        ) as backend_type:
+            output_dir = Path(temp) / "midi"
+            output_dir.mkdir()
+            (output_dir / "old_basic_pitch.mid").write_bytes(b"MThd")
+            raw_path = output_dir / "raw_transcription" / "transkun_raw.mid"
+            raw_path.parent.mkdir()
+            raw_path.write_bytes(b"old")
+            backend_type.return_value.transcribe.return_value = raw_path
+
+            result = convert_audio_to_midi(
+                "input.wav",
+                output_dir,
+                transcription_engine="Transkun (WSL)",
+            )
+
+            self.assertEqual(result, raw_path)
+            backend_type.return_value.transcribe.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
