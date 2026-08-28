@@ -43,6 +43,48 @@ class TranskunWSLBackendTests(unittest.TestCase):
             with self.assertRaisesRegex(TranskunWSLError, "distribution Ubuntu-24.04"):
                 backend.transcribe("in.wav", "out.mid")
 
+    def test_requested_taipei_unicode_path_is_not_empty(self):
+        windows_path = (
+            "C:\\Users\\PC\\Desktop\\python_script\\youtube_to_midi\\output\\"
+            "能不能和我留在台北 (陪我幾天) - 冰球樂團icyball - 鋼琴教學_NAfgID7h8nk\\"
+            "download\\song.wav"
+        )
+        backend = TranskunWSLBackend(runner=self._runner)
+        converted = backend.windows_to_wsl_path(windows_path)
+        self.assertTrue(converted)
+        self.assertIn("能不能和我留在台北 (陪我幾天)", converted)
+
+    def test_empty_converted_path_aborts_before_transkun(self):
+        runner = mock.Mock(
+            side_effect=[
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, "   \n", ""),
+            ]
+        )
+        popen = mock.Mock()
+        backend = TranskunWSLBackend(runner=runner, popen=popen)
+        with mock.patch("transkun_wsl.shutil.which", return_value="wsl.exe"):
+            with self.assertRaisesRegex(TranskunWSLError, "empty path"):
+                backend.transcribe("input.wav", "output.mid")
+        popen.assert_not_called()
+
+    def test_missing_wsl_input_aborts_with_both_paths(self):
+        def runner(command, **kwargs):
+            if "wslpath" in " ".join(command):
+                return subprocess.CompletedProcess(command, 0, "/mnt/c/input.wav\n", "")
+            if "test" in command and "-f" in command:
+                return subprocess.CompletedProcess(command, 1, "", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        popen = mock.Mock()
+        backend = TranskunWSLBackend(runner=runner, popen=popen, logger=lambda _: None)
+        with mock.patch("transkun_wsl.shutil.which", return_value="wsl.exe"):
+            with self.assertRaises(TranskunWSLError) as raised:
+                backend.transcribe("input.wav", "output.mid")
+        self.assertIn("Windows input path:", str(raised.exception))
+        self.assertIn("WSL input path: /mnt/c/input.wav", str(raised.exception))
+        popen.assert_not_called()
+
     def test_missing_venv_or_import_failure_is_readable(self):
         calls = 0
         def runner(command, **kwargs):
@@ -67,8 +109,11 @@ class TranskunWSLBackendTests(unittest.TestCase):
                 backend = TranskunWSLBackend(runner=self._runner, popen=popen, logger=lambda _: None)
                 with mock.patch("transkun_wsl.shutil.which", return_value="wsl.exe"):
                     self.assertEqual(backend.transcribe(source, output, device=device), output.resolve())
-                self.assertEqual(any("--device" in arg for arg in made[0]), cuda_expected)
-                self.assertEqual(made[0][-3], "_")
+                self.assertEqual(made[0][-4], "_")
+                self.assertEqual(made[0][-1], device.lower())
+                self.assertEqual(made[0][3], "--exec")
+                self.assertIn('"$1" "$2"', made[0][-5])
+                self.assertIn('"$3"', made[0][-5])
 
     def test_failure_and_missing_output_are_readable(self):
         with tempfile.TemporaryDirectory() as temp:

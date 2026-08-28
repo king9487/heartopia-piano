@@ -37,9 +37,11 @@ class TranskunWSLBackend:
         return '"$HOME/' + self.venv.removeprefix("~/") + '/bin/python"'
 
     def _base_command(self):
-        return ["wsl.exe", "-d", self.distro]
+        # --exec bypasses WSL's default shell so backslashes, Unicode, and
+        # bash -lc positional arguments arrive unchanged.
+        return ["wsl.exe", "-d", self.distro, "--exec"]
 
-    def _run_check(self, args):
+    def _run_check(self, args, input_text=None):
         try:
             return self.runner(
                 self._base_command() + args,
@@ -48,6 +50,7 @@ class TranskunWSLBackend:
                 encoding="utf-8",
                 errors="replace",
                 check=False,
+                input=input_text,
             )
         except FileNotFoundError as exc:
             raise TranskunWSLError(
@@ -59,14 +62,53 @@ class TranskunWSLBackend:
         return result.returncode == 0
 
     def windows_to_wsl_path(self, path):
-        result = self._run_check(["wslpath", "-a", str(Path(path).resolve())])
+        windows_path = str(Path(path).resolve())
+        try:
+            result = self.runner(
+                [
+                    "wsl.exe", "-d", self.distro,
+                    "--exec", "wslpath", "-a", windows_path,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise TranskunWSLError(
+                "WSL is not installed or wsl.exe is not available."
+            ) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
             raise TranskunWSLError(
                 f"Could not convert Windows path for WSL: {path}"
                 + (f"\n{detail}" if detail else "")
             )
-        return result.stdout.strip()
+        converted = result.stdout.strip()
+        if not converted:
+            raise TranskunWSLError(
+                "WSL path conversion returned an empty path.\n"
+                f"Windows path: {windows_path}"
+            )
+        return converted
+
+    def check_input_exists(self, input_path, input_wsl):
+        if not input_wsl:
+            raise TranskunWSLError(
+                "Converted WSL input path is empty; Transkun was not started.\n"
+                f"Windows input path: {input_path}"
+            )
+        result = self._run_check(["test", "-f", input_wsl])
+        exists = result.returncode == 0
+        self.logger(f"Input exists in WSL: {'true' if exists else 'false'}")
+        if not exists:
+            raise TranskunWSLError(
+                "Input audio file was not found inside WSL.\n"
+                f"Windows input path: {input_path}\n"
+                f"WSL input path: {input_wsl}"
+            )
+        return True
 
     def check_transkun(self):
         script = (
@@ -91,13 +133,15 @@ class TranskunWSLBackend:
         result = self._run_check(["bash", "-lc", script])
         return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
-    def _transcribe_command(self, input_wsl, output_wsl, use_cuda):
+    def _transcribe_command(self, input_wsl, output_wsl, selected_device):
         script = (
-            f"exec {self.python_command} -m transkun.transcribe \"$1\" \"$2\""
-            + (" --device cuda" if use_cuda else "")
+            f'if [ "$3" = cuda ]; then '
+            f'exec {self.python_command} -m transkun.transcribe "$1" "$2" '
+            f'--device "$3"; else '
+            f'exec {self.python_command} -m transkun.transcribe "$1" "$2"; fi'
         )
         return self._base_command() + [
-            "bash", "-lc", script, "_", input_wsl, output_wsl
+            "bash", "-lc", script, "_", input_wsl, output_wsl, selected_device
         ]
 
     def transcribe(self, input_path, output_path, device="Auto", cancel_token=None):
@@ -119,19 +163,29 @@ class TranskunWSLBackend:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         input_wsl = self.windows_to_wsl_path(input_path)
         output_wsl = self.windows_to_wsl_path(output_path)
+        if not output_wsl:
+            raise TranskunWSLError(
+                "Converted WSL output path is empty; Transkun was not started.\n"
+                f"Windows output path: {output_path}"
+            )
+        for message in (
+            f"Windows input path: {input_path}",
+            f"WSL input path: {input_wsl}",
+            f"Windows output path: {output_path}",
+            f"WSL output path: {output_wsl}",
+        ):
+            self.logger(message)
+        self.check_input_exists(input_path, input_wsl)
         use_cuda = requested == "CUDA" or (requested == "Auto" and self.check_cuda())
         selected = "CUDA" if use_cuda else "CPU"
-        command = self._transcribe_command(input_wsl, output_wsl, use_cuda)
+        command = self._transcribe_command(input_wsl, output_wsl, selected.lower())
 
         for message in (
             "Transcription engine: Transkun (WSL)",
             f"WSL distro: {self.distro}",
-            f"Input Windows path: {input_path}",
-            f"Input WSL path: {input_wsl}",
-            f"Output Windows path: {output_path}",
-            f"Output WSL path: {output_wsl}",
             f"Device requested: {requested}",
             f"Device selected: {selected}",
+            f"Final subprocess argv: {command!r}",
         ):
             self.logger(message)
 
