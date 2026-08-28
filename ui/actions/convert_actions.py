@@ -534,7 +534,7 @@ class UiConvertActionsMixin:
         self, url, options=None, separation_mode=None, stem_to_convert=None
     ):
         try:
-            check_cli_dependencies()
+            check_cli_dependencies(self.transcription_engine_var.get())
             self.queue.put(("status", "Downloading and converting"))
             demucs_device = self.demucs_device_var.get()
             if demucs_device == "auto":
@@ -550,6 +550,8 @@ class UiConvertActionsMixin:
                 options=options,
                 separation_mode=separation_mode,
                 stem_to_convert=stem_to_convert,
+                transcription_engine=self.transcription_engine_var.get(),
+                transkun_device=self.transkun_device_var.get(),
             )
             self._queue_conversion_result(results)
         except CancelledError:
@@ -561,7 +563,7 @@ class UiConvertActionsMixin:
         self, filename, options=None, separation_mode=None, stem_to_convert=None
     ):
         try:
-            check_cli_dependencies()
+            check_cli_dependencies(self.transcription_engine_var.get())
             self.queue.put(("status", "Converting local audio"))
             demucs_device = self.demucs_device_var.get()
             if demucs_device == "auto":
@@ -577,6 +579,8 @@ class UiConvertActionsMixin:
                 options=options,
                 separation_mode=separation_mode,
                 stem_to_convert=stem_to_convert,
+                transcription_engine=self.transcription_engine_var.get(),
+                transkun_device=self.transkun_device_var.get(),
             )
             self._queue_conversion_result(results)
         except CancelledError:

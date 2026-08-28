@@ -1,8 +1,11 @@
+import tkinter as tk
 from tkinter import ttk
 
-from converter import SEPARATION_MODES, SEPARATION_STEMS
+from converter import SEPARATION_MODES, SEPARATION_STEMS, TRANSCRIPTION_ENGINES
 
 def build_convert_panel(app, parent, start_row=0):
+    app.transcription_engine_var = tk.StringVar(value="Basic Pitch")
+    app.transkun_device_var = tk.StringVar(value="Auto")
     top = ttk.LabelFrame(parent, text="Input Source", padding=12)
     top.grid(row=start_row, column=0, sticky="ew")
     top.columnconfigure(0, weight=1)
@@ -93,6 +96,26 @@ def build_convert_panel(app, parent, start_row=0):
         state="readonly",
         width=22,
     ).grid(row=2, column=1, sticky="w", padx=(8, 20), pady=(8, 0))
+    ttk.Label(conversion_options, text="Transcription Engine").grid(
+        row=3, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Combobox(
+        conversion_options,
+        textvariable=app.transcription_engine_var,
+        values=TRANSCRIPTION_ENGINES,
+        state="readonly",
+        width=22,
+    ).grid(row=3, column=1, sticky="w", padx=(8, 20), pady=(8, 0))
+    ttk.Label(conversion_options, text="Transkun device").grid(
+        row=4, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Combobox(
+        conversion_options,
+        textvariable=app.transkun_device_var,
+        values=("Auto", "CPU", "CUDA"),
+        state="readonly",
+        width=22,
+    ).grid(row=4, column=1, sticky="w", padx=(8, 20), pady=(8, 0))
 
     app.on_input_source_changed()
 

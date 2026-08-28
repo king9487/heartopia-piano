@@ -126,8 +126,13 @@ def find_ffmpeg_location():
     return str(ffmpeg_dir)
 
 
-def check_cli_dependencies():
-    missing = [tool for tool in REQUIRED_TOOLS if not find_executable(tool)]
+def check_cli_dependencies(transcription_engine="Basic Pitch"):
+    required_tools = tuple(
+        tool
+        for tool in REQUIRED_TOOLS
+        if not (transcription_engine == "Transkun (WSL)" and tool == "basic-pitch")
+    )
+    missing = [tool for tool in required_tools if not find_executable(tool)]
     if "ffmpeg" not in missing and not find_ffmpeg_location():
         missing.append("ffmpeg/ffprobe")
     if missing:

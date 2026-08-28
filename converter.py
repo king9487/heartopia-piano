@@ -33,6 +33,7 @@ from midi_piano_arranger import (
 )
 from tools import find_executable, find_ffmpeg_location, run, run_capture
 from midi_to_keyboard import DEFAULT_NOTE_MAP, octave_shift_note
+from transkun_wsl import TranskunWSLBackend
 
 
 CLEAN_37KEY_MIDI_NAME = "01_clean_37key.mid"
@@ -67,6 +68,8 @@ SEPARATION_MODES = (
 SEPARATION_STEMS = ("no_vocals", "other", "bass", "drums", "vocals")
 DEFAULT_SEPARATION_MODE = "Demucs vocals only"
 DEFAULT_SEPARATION_STEM = "no_vocals"
+TRANSCRIPTION_ENGINES = ("Basic Pitch", "Transkun (WSL)")
+DEFAULT_TRANSCRIPTION_ENGINE = "Basic Pitch"
 
 
 def youtube_download_base_args():
@@ -1066,6 +1069,8 @@ def convert_audio_to_midi(
     output_dir,
     cancel_token=None,
     progress_callback=None,
+    transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
+    transkun_device="Auto",
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1075,6 +1080,18 @@ def convert_audio_to_midi(
         print("Using existing MIDI:", existing_midi)
         return existing_midi
 
+    if transcription_engine == "Transkun (WSL)":
+        raw_path = output_dir / "raw_transcription" / "transkun_raw.mid"
+        backend = TranskunWSLBackend(logger=lambda message: _report_basic_pitch_message(
+            message, progress_callback
+        ))
+        return backend.transcribe(
+            audio_file, raw_path, device=transkun_device, cancel_token=cancel_token
+        )
+    if transcription_engine != "Basic Pitch":
+        raise ValueError(f"Unknown transcription engine: {transcription_engine}")
+
+    _report_basic_pitch_message("Transcription engine: Basic Pitch", progress_callback)
     diagnostics = get_basic_pitch_backend_diagnostics()
     _report_basic_pitch_message(
         f"ONNX Runtime version: {diagnostics['version']}", progress_callback
@@ -1145,6 +1162,8 @@ def youtube_to_midi(
     options=None,
     separation_mode=DEFAULT_SEPARATION_MODE,
     stem_to_convert=DEFAULT_SEPARATION_STEM,
+    transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
+    transkun_device="Auto",
 ):
     report_progress = progress_callback or (lambda message: None)
     report_progress(
@@ -1152,6 +1171,7 @@ def youtube_to_midi(
     )
     report_progress(f"Separation mode: {separation_mode}")
     report_progress(f"Stem to convert: {stem_to_convert}")
+    report_progress(f"Transcription engine: {transcription_engine}")
     print("Separation mode:", separation_mode)
     print("Stem to convert:", stem_to_convert)
     base_dir = Path(base_dir) if base_dir else output_dir_for_url(url, cancel_token=cancel_token)
@@ -1164,6 +1184,7 @@ def youtube_to_midi(
     is_legacy_default = (
         separation_mode == DEFAULT_SEPARATION_MODE
         and stem_to_convert == DEFAULT_SEPARATION_STEM
+        and transcription_engine == DEFAULT_TRANSCRIPTION_ENGINE
     )
     cached_results = results_from_output_dir(base_dir) if is_legacy_default else None
     if cached_results:
@@ -1175,6 +1196,8 @@ def youtube_to_midi(
                 midi_dir / "vocals",
                 cancel_token=cancel_token,
                 progress_callback=progress_callback,
+                transcription_engine=transcription_engine,
+                transkun_device=transkun_device,
             )
         return ensure_clean_results(
             cached_results,
@@ -1206,6 +1229,8 @@ def youtube_to_midi(
             midi_dir / "vocals",
             cancel_token=cancel_token,
             progress_callback=progress_callback,
+            transcription_engine=transcription_engine,
+            transkun_device=transkun_device,
         )
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
@@ -1221,6 +1246,8 @@ def youtube_to_midi(
         selected_midi_dir,
         cancel_token=cancel_token,
         progress_callback=progress_callback,
+        transcription_engine=transcription_engine,
+        transkun_device=transkun_device,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
@@ -1300,6 +1327,8 @@ def audio_file_to_midi(
     options=None,
     separation_mode=DEFAULT_SEPARATION_MODE,
     stem_to_convert=DEFAULT_SEPARATION_STEM,
+    transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
+    transkun_device="Auto",
 ):
     report_progress = progress_callback or (lambda message: None)
     report_progress(
@@ -1307,6 +1336,7 @@ def audio_file_to_midi(
     )
     report_progress(f"Separation mode: {separation_mode}")
     report_progress(f"Stem to convert: {stem_to_convert}")
+    report_progress(f"Transcription engine: {transcription_engine}")
     print("Separation mode:", separation_mode)
     print("Stem to convert:", stem_to_convert)
     base_dir = Path(base_dir) if base_dir else output_dir_for_audio_file(audio_file)
@@ -1319,6 +1349,7 @@ def audio_file_to_midi(
     is_legacy_default = (
         separation_mode == DEFAULT_SEPARATION_MODE
         and stem_to_convert == DEFAULT_SEPARATION_STEM
+        and transcription_engine == DEFAULT_TRANSCRIPTION_ENGINE
     )
     cached_results = results_from_output_dir(base_dir) if is_legacy_default else None
     if cached_results:
@@ -1330,6 +1361,8 @@ def audio_file_to_midi(
                 midi_dir / "vocals",
                 cancel_token=cancel_token,
                 progress_callback=progress_callback,
+                transcription_engine=transcription_engine,
+                transkun_device=transkun_device,
             )
         return ensure_clean_results(
             cached_results,
@@ -1361,6 +1394,8 @@ def audio_file_to_midi(
             midi_dir / "vocals",
             cancel_token=cancel_token,
             progress_callback=progress_callback,
+            transcription_engine=transcription_engine,
+            transkun_device=transkun_device,
         )
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
@@ -1376,6 +1411,8 @@ def audio_file_to_midi(
         selected_midi_dir,
         cancel_token=cancel_token,
         progress_callback=progress_callback,
+        transcription_engine=transcription_engine,
+        transkun_device=transkun_device,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
