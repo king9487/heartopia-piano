@@ -71,6 +71,28 @@ class BasicPitchBackendTests(unittest.TestCase):
             self.assertEqual(fallback_command, ["basic-pitch", str(output_dir), "input.wav"])
             self.assertIn("Basic Pitch CLI is using TensorFlow backend.", messages)
 
+    def test_force_removes_existing_midi_and_runs_transcription_again(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "midi"
+            output_dir.mkdir()
+            existing = output_dir / "old.mid"
+            existing.write_bytes(b"old")
+
+            def fake_run(command, cancel_token=None):
+                self.assertFalse(existing.exists())
+                self._write_midi(output_dir)
+
+            with mock.patch(
+                "converter.get_basic_pitch_backend_diagnostics",
+                return_value=self.diagnostics,
+            ), mock.patch("converter.find_executable", return_value="basic-pitch"), mock.patch(
+                "converter.run", side_effect=fake_run
+            ) as run_mock:
+                result = convert_audio_to_midi("input.wav", output_dir, force=True)
+
+            run_mock.assert_called_once()
+            self.assertEqual(result, output_dir / "transcribed.mid")
+
 
 if __name__ == "__main__":
     unittest.main()

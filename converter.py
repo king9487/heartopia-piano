@@ -474,10 +474,11 @@ def piano_arranged_midi_path(raw_midi):
     return Path(raw_midi).with_name(PIANO_ARRANGED_MIDI_NAME)
 
 
-def ensure_clean_37key_midi(raw_midi, options=None):
+def ensure_clean_37key_midi(raw_midi, options=None, force=False):
     output_midi = clean_37key_midi_path(raw_midi)
     if (
-        options is None
+        not force
+        and options is None
         and output_midi.exists()
         and output_midi.stat().st_mtime >= Path(raw_midi).stat().st_mtime
     ):
@@ -574,9 +575,9 @@ def rebuild_midi_stages(raw_midi, start_stage, options=None):
     }
 
 
-def ensure_full_post_processing(raw_midi, options=None):
+def ensure_full_post_processing(raw_midi, options=None, force=False):
     raw_midi = Path(raw_midi)
-    clean_midi = ensure_clean_37key_midi(raw_midi, options=options)
+    clean_midi = ensure_clean_37key_midi(raw_midi, options=options, force=force)
     piano_arranged_midi = piano_arranged_midi_path(clean_midi)
     arrangement_report = clean_midi.with_name(PIANO_ARRANGEMENT_REPORT_NAME)
     piano_cover_midi = piano_cover_midi_path(clean_midi)
@@ -587,7 +588,8 @@ def ensure_full_post_processing(raw_midi, options=None):
     post_process_result = None
 
     if (
-        options is None
+        not force
+        and options is None
         and piano_arranged_midi.exists()
         and arrangement_report.exists()
         and piano_cover_midi.exists()
@@ -1074,6 +1076,7 @@ def convert_audio_to_midi(
     progress_callback=None,
     transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
     transkun_device="Auto",
+    force=False,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1095,9 +1098,12 @@ def convert_audio_to_midi(
         raise ValueError(f"Unknown transcription engine: {transcription_engine}")
 
     existing_midi = latest_midi_file(output_dir)
-    if existing_midi:
+    if existing_midi and not force:
         print("Using existing MIDI:", existing_midi)
         return existing_midi
+    if existing_midi:
+        print("Regenerating existing Basic Pitch MIDI:", existing_midi)
+        existing_midi.unlink()
 
     _report_basic_pitch_message("Transcription engine: Basic Pitch", progress_callback)
     diagnostics = get_basic_pitch_backend_diagnostics()
@@ -1194,25 +1200,6 @@ def youtube_to_midi(
         and stem_to_convert == DEFAULT_SEPARATION_STEM
         and transcription_engine == DEFAULT_TRANSCRIPTION_ENGINE
     )
-    cached_results = results_from_output_dir(base_dir) if is_legacy_default else None
-    if cached_results:
-        print("Using cached conversion:", base_dir)
-        if convert_vocals_midi and not cached_results.get("vocal_midi"):
-            print("Cached output has no vocals MIDI. Converting vocals to MIDI...")
-            cached_results["vocal_midi"] = convert_audio_to_midi(
-                cached_results["vocals"],
-                midi_dir / "vocals",
-                cancel_token=cancel_token,
-                progress_callback=progress_callback,
-                transcription_engine=transcription_engine,
-                transkun_device=transkun_device,
-            )
-        return ensure_clean_results(
-            cached_results,
-            include_vocals=convert_vocals_midi,
-            options=options,
-        )
-
     print("Step 1: Downloading YouTube audio...")
     wav_file = download_youtube_audio(url, download_dir, cancel_token=cancel_token)
 
@@ -1239,6 +1226,7 @@ def youtube_to_midi(
             progress_callback=progress_callback,
             transcription_engine=transcription_engine,
             transkun_device=transkun_device,
+            force=True,
         )
     else:
         print("Step 3: Skipping vocals MIDI conversion.")
@@ -1256,11 +1244,12 @@ def youtube_to_midi(
         progress_callback=progress_callback,
         transcription_engine=transcription_engine,
         transkun_device=transkun_device,
+        force=True,
     )
 
     print("Step 5: Generating Piano Cover and 37-Key MIDI files...")
     if vocal_midi:
-        vocal_outputs = ensure_full_post_processing(vocal_midi, options=options)
+        vocal_outputs = ensure_full_post_processing(vocal_midi, options=options, force=True)
         vocal_piano_arranged_midi = vocal_outputs["piano_arranged_midi"]
         vocal_analysis_report = vocal_outputs["analysis_report"]
         vocal_report_path = vocal_outputs["report_path"]
@@ -1279,7 +1268,9 @@ def youtube_to_midi(
         vocal_pitch_corrected_midi = None
         vocal_final_midi = None
         vocal_detected_key = None
-    accompaniment_outputs = ensure_full_post_processing(accompaniment_midi, options=options)
+    accompaniment_outputs = ensure_full_post_processing(
+        accompaniment_midi, options=options, force=True
+    )
     accompaniment_piano_arranged_midi = accompaniment_outputs["piano_arranged_midi"]
     accompaniment_analysis_report = accompaniment_outputs["analysis_report"]
     accompaniment_report_path = accompaniment_outputs["report_path"]
