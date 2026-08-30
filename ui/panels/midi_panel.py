@@ -42,8 +42,8 @@ def build_midi_sources_panel(app, parent, row=0):
     sources = ttk.LabelFrame(parent, text="Current MIDI source / version", padding=10)
     app.playback_sources_frame = sources
     sources.grid(row=row, column=0, sticky="ew", padx=12, pady=(12, 8))
-    sources.columnconfigure(0, weight=10, uniform="midi_sources")
-    sources.columnconfigure(1, weight=70, uniform="midi_sources")
+    sources.columnconfigure(0, weight=12, uniform="midi_sources")
+    sources.columnconfigure(1, weight=68, uniform="midi_sources")
     sources.columnconfigure(2, weight=10, uniform="midi_sources")
     sources.columnconfigure(3, weight=10, uniform="midi_sources")
     ttk.Label(sources, text="Output source").grid(row=0, column=0, sticky="w")
