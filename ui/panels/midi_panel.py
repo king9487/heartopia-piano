@@ -54,7 +54,7 @@ def build_midi_sources_panel(app, parent, row=0):
 
     ttk.Label(sources, text="Converted").grid(row=1, column=0, sticky="w", pady=(8, 0))
     app.cached_combo = ttk.Combobox(
-        sources, textvariable=app.cached_choice_var, state="readonly"
+        sources, textvariable=app.cached_choice_var, state="readonly", width=36
     )
     app.cached_combo.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
     ttk.Button(sources, text="Refresh", command=app.refresh_converted_outputs).grid(
