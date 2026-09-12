@@ -64,6 +64,8 @@ local settings file. Never commit or share your API key.
 
 ### Keyboard Mapping 模板
 
+內建 `8-Key C4-C5` 配置也可在 `Mapping Profile` 選單選取，C4 D4 E4 F4 G4 A4 B4 C5 依序對應 `Y U I O H J K L`，僅包含八個白鍵（MIDI note 60–72）。配置已收錄於 `config/keyboard_mappings.json`，可直接修改按鍵。
+
 內建 `15-Key C4-C6` 配置可直接在 `Mapping Profile` 選單選取，對應 15 個白鍵音符：
 
 | 音符 | 按鍵 |

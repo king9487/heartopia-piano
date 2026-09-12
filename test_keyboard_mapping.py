@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,6 +8,7 @@ import mido
 from keyboard_mapping import (
     DEFAULT_MAPPING_PROFILE,
     DIATONIC_MAPPING_PROFILE,
+    EIGHT_KEY_MAPPING_PROFILE,
     MappingProfile,
     STANDARD_MAPPING_PROFILE,
     get_playable_note_constraints,
@@ -33,6 +35,34 @@ def write_test_midi(path, notes=(60,), ticks=120):
 
 
 class KeyboardMappingTests(unittest.TestCase):
+    def test_8_key_preset_config_and_builtin_play_white_keys(self):
+        notes = (60, 62, 64, 65, 67, 69, 71, 72)
+        expected = dict(zip(notes, "yuiohjkl"))
+        config = Path(__file__).parent / "config" / "keyboard_mappings.json"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        entries = [p for p in payload["profiles"] if p["name"] == EIGHT_KEY_MAPPING_PROFILE]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual({int(n): k for n, k in entries[0]["mappings"].items()}, expected)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "mappings.json"
+            path.write_text('{"profiles": []}', encoding="utf-8")
+            for config_path in (path, config):
+                with self.subTest(config=config_path):
+                    profile = load_mapping_profile(EIGHT_KEY_MAPPING_PROFILE, config_path)
+                    self.assertEqual(profile.name, EIGHT_KEY_MAPPING_PROFILE)
+                    self.assertEqual(profile.keyboard_map, expected)
+                    constraints = get_playable_note_constraints(profile)
+                    self.assertEqual(constraints["allowed_notes"], list(notes))
+                    self.assertEqual(constraints["min_note_name"], "C4")
+                    self.assertEqual(constraints["max_note_name"], "C5")
+                    source = Path(directory) / "white_keys.mid"
+                    write_test_midi(source, notes=notes)
+                    schedule = build_keyboard_schedule(source, mapping_profile=profile)
+                    self.assertEqual(
+                        [(e[2], e[3]) for e in schedule if e[1] == "down"],
+                        list(expected.items()),
+                    )
+
     def test_15_key_preset_loads_with_existing_config_and_plays_white_keys(self):
         notes = (60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83, 84)
         with TemporaryDirectory() as directory:
