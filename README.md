@@ -62,6 +62,17 @@ That runtime file is ignored by Git. The tracked template is
 `config/ai_settings.example.json`; copy it manually only if you want to seed a
 local settings file. Never commit or share your API key.
 
+### Keyboard Mapping 模板
+
+空白模板位於 [`config/keyboard_mappings.example.json`](config/keyboard_mappings.example.json)，包含 Heartopia 預設音域 C3–C6（MIDI note 48–84）的 37 個音符。
+
+1. 將模板中的 `name` 改成自己的配置名稱。
+2. 在 `mappings` 填入按鍵，例如 `"60": "a"` 表示 C4 按下 `a`。可使用單一字元或 `space`、`enter`、`left`、`f1` 等按鍵名稱；空字串 `""` 表示未指派，不會播放該音符。避免多個音符使用相同按鍵。
+3. 關閉程式，將模板的 profile 物件（包含 `name` 和 `mappings`）加入 `config/keyboard_mappings.json` 的 `profiles` 陣列，保留原有配置。若該設定檔尚不存在，可直接複製模板並命名為 `keyboard_mappings.json`。
+4. 重新啟動程式，在 `Keyboard Mapping` 的配置選單選取自己的名稱；可在介面繼續編輯，按 `Validate Mapping` 檢查，再按 `Save Mapping` 儲存。
+
+模板不會自動載入；使用前至少要指派一個按鍵。其他音域可自行增減 MIDI note 編號（0–127），並在介面選擇相符的 Keyboard Profile。
+
 ## 第一次使用
 
 最穩妥的入門流程：
