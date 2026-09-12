@@ -64,6 +64,15 @@ local settings file. Never commit or share your API key.
 
 ### Keyboard Mapping 模板
 
+內建 `15-Key C4-C6` 配置可直接在 `Mapping Profile` 選單選取，對應 15 個白鍵音符：
+
+| 音符 | 按鍵 |
+| --- | --- |
+| C4 D4 E4 F4 G4 A4 B4 | A S D F G H J |
+| C5 D5 E5 F5 G5 A5 B5 C6 | Q W E R T Y U I |
+
+此配置的可演奏範圍為 MIDI note 60–84，未指派升降音。使用預設 `Heartopia` Keyboard Profile 即可編輯全部 15 個按鍵。
+
 空白模板位於 [`config/keyboard_mappings.example.json`](config/keyboard_mappings.example.json)，包含 Heartopia 預設音域 C3–C6（MIDI note 48–84）的 37 個音符。
 
 1. 將模板中的 `name` 改成自己的配置名稱。

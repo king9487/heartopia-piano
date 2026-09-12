@@ -9,6 +9,7 @@ import re
 MAPPING_CONFIG_PATH = Path("config") / "keyboard_mappings.json"
 DEFAULT_MAPPING_PROFILE = "Heartopia Default"
 STANDARD_MAPPING_PROFILE = "Standard 37-Key"
+DIATONIC_MAPPING_PROFILE = "15-Key C4-C6"
 EMPTY_CUSTOM_PROFILE = "Empty Custom"
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
@@ -55,6 +56,24 @@ STANDARD_37KEY_NOTE_MAP = {
 DEFAULT_NOTE_MAP = {
     note + 12: key
     for note, key in STANDARD_37KEY_NOTE_MAP.items()
+}
+
+DIATONIC_15KEY_NOTE_MAP = {
+    60: "a",
+    62: "s",
+    64: "d",
+    65: "f",
+    67: "g",
+    69: "h",
+    71: "j",
+    72: "q",
+    74: "w",
+    76: "e",
+    77: "r",
+    79: "t",
+    81: "y",
+    83: "u",
+    84: "i",
 }
 
 VALID_NAMED_KEYS = {
@@ -149,6 +168,9 @@ def default_mapping_profiles():
         ),
         STANDARD_MAPPING_PROFILE: MappingProfile(
             STANDARD_MAPPING_PROFILE, dict(STANDARD_37KEY_NOTE_MAP)
+        ),
+        DIATONIC_MAPPING_PROFILE: MappingProfile(
+            DIATONIC_MAPPING_PROFILE, dict(DIATONIC_15KEY_NOTE_MAP)
         ),
         EMPTY_CUSTOM_PROFILE: MappingProfile(EMPTY_CUSTOM_PROFILE, {}),
     }
